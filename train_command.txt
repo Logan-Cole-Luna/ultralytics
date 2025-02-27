@@ -1,3 +1,10 @@
 yolo train data=coco128.yaml model=yolov8n.pt optimizer=GGD epochs=10 project=YoloV8cocoGGD name=Attempt plots=True visualize=True
 
 yolo train data=coco128.yaml model=yolov8n.pt optimizer=Adam epochs=10 project=YoloV8cocoAdam name=Attempt plots=True visualize=True
+
+
+"C:/VSCode/datasets/coco/coco.yaml"
+
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo12n.pt optimizer=GGD epochs=5 project=YoloV12-coco-GGD name=Attempt plots=True visualize=True
+
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo12n.pt optimizer=Adam epochs=5 project=YoloV12-coco-Adam name=Attempt plots=True visualize=True
