@@ -1,0 +1,348 @@
+    4. Export a YOLO11n classification model to ONNX format at image size 224 by 128 (no TASK required)
+C:\VSCode\ultralytics> [GGD | f0665bb5 | Up-to-date]yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.pt optimizer=SGD epochs=25 project=YoloV11-25-coco-SGD name=SGD-Attempt-Transfer plots=True visualize=True imgsz=640 workers=12           
+New https://pypi.org/project/ultralytics/8.3.81 available 😃 Update with 'pip install -U ultralytics'
+Ultralytics 8.3.79 🚀 Python-3.12.6 torch-2.6.0+cu126 CUDA:0 (NVIDIA GeForce RTX 3060, 12288MiB)
+engine\trainer: task=detect, mode=train, model=yolo11n.pt, data=C:/VSCode/datasets/coco/coco.yaml, epochs=25, time=None, patience=100, batch=16, imgsz=640, save=True, save_period=-1, cache=False, device=None, workers=12, project=YoloV11-25-coco-SGD, name=SGD-Attempt-Transfer, exist_ok=False, pretrained=True, optimizer=SGD, verbose=True, seed=0, deterministic=True, single_cls=False, rect=False, cos_lr=False, close_mosaic=10, resume=False, amp=True, fraction=1.0, profile=False, freeze=None, multi_scale=False, overlap_mask=True, mask_ratio=4, dropout=0.0, val=True, split=val, save_json=False, save_hybrid=False, conf=None, iou=0.7, max_det=300, half=False, dnn=False, plots=True, source=None, vid_stride=1, stream_buffer=False, visualize=True, augment=False, agnostic_nms=False, classes=None, retina_masks=False, embed=None, show=False, save_frames=False, save_txt=False, save_conf=False, save_crop=False, show_labels=True, show_conf=True, show_boxes=True, line_width=None, format=torchscript, keras=False, optimize=False, int8=False, dynamic=False, simplify=True, opset=None, workspace=None, nms=False, lr0=0.01, lrf=0.01, momentum=0.937, weight_decay=0.0005, warmup_epochs=3.0, warmup_momentum=0.8, warmup_bias_lr=0.1, box=7.5, cls=0.5, dfl=1.5, pose=12.0, kobj=1.0, nbs=64, hsv_h=0.015, hsv_s=0.7, hsv_v=0.4, degrees=0.0, translate=0.1, scale=0.5, shear=0.0, perspective=0.0, flipud=0.0, fliplr=0.5, bgr=0.0, mosaic=1.0, mixup=0.0, copy_paste=0.0, copy_paste_mode=flip, auto_augment=randaugment, erasing=0.4, crop_fraction=1.0, cfg=None, tracker=botsort.yaml, save_dir=YoloV11-25-coco-SGD\SGD-Attempt-Transfer
+
+                   from  n    params  module                                       arguments
+  0                  -1  1       464  ultralytics.nn.modules.conv.Conv             [3, 16, 3, 2]
+  1                  -1  1      4672  ultralytics.nn.modules.conv.Conv             [16, 32, 3, 2]
+  2                  -1  1      6640  ultralytics.nn.modules.block.C3k2            [32, 64, 1, False, 0.25]      
+  3                  -1  1     36992  ultralytics.nn.modules.conv.Conv             [64, 64, 3, 2]
+  4                  -1  1     26080  ultralytics.nn.modules.block.C3k2            [64, 128, 1, False, 0.25]     
+  5                  -1  1    147712  ultralytics.nn.modules.conv.Conv             [128, 128, 3, 2]
+  6                  -1  1     87040  ultralytics.nn.modules.block.C3k2            [128, 128, 1, True]
+  7                  -1  1    295424  ultralytics.nn.modules.conv.Conv             [128, 256, 3, 2]
+  8                  -1  1    346112  ultralytics.nn.modules.block.C3k2            [256, 256, 1, True]
+  9                  -1  1    164608  ultralytics.nn.modules.block.SPPF            [256, 256, 5]
+ 10                  -1  1    249728  ultralytics.nn.modules.block.C2PSA           [256, 256, 1]
+ 11                  -1  1         0  torch.nn.modules.upsampling.Upsample         [None, 2, 'nearest']
+ 12             [-1, 6]  1         0  ultralytics.nn.modules.conv.Concat           [1]
+ 13                  -1  1    111296  ultralytics.nn.modules.block.C3k2            [384, 128, 1, False]
+ 14                  -1  1         0  torch.nn.modules.upsampling.Upsample         [None, 2, 'nearest']
+ 15             [-1, 4]  1         0  ultralytics.nn.modules.conv.Concat           [1]
+ 16                  -1  1     32096  ultralytics.nn.modules.block.C3k2            [256, 64, 1, False]
+ 17                  -1  1     36992  ultralytics.nn.modules.conv.Conv             [64, 64, 3, 2]
+ 18            [-1, 13]  1         0  ultralytics.nn.modules.conv.Concat           [1]
+ 19                  -1  1     86720  ultralytics.nn.modules.block.C3k2            [192, 128, 1, False]
+ 20                  -1  1    147712  ultralytics.nn.modules.conv.Conv             [128, 128, 3, 2]
+ 21            [-1, 10]  1         0  ultralytics.nn.modules.conv.Concat           [1]
+ 22                  -1  1    378880  ultralytics.nn.modules.block.C3k2            [384, 256, 1, True]
+ 23        [16, 19, 22]  1    464912  ultralytics.nn.modules.head.Detect           [80, [64, 128, 256]]
+YOLO11n summary: 181 layers, 2,624,080 parameters, 2,624,064 gradients, 6.6 GFLOPs
+
+Transferred 499/499 items from pretrained weights
+wandb: Using wandb-core as the SDK backend.  Please refer to https://wandb.me/wandb-core for more information.
+wandb: Currently logged in as: logan03luna (loganluna) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: Tracking run with wandb version 0.19.7
+wandb: Run data is saved locally in C:\VSCode\ultralytics\wandb\run-20250228_080319-8a2qwya2
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run SGD-Attempt-Transfer
+wandb:  View project at https://wandb.ai/loganluna/YoloV11-25-coco-SGD
+wandb:  View run at https://wandb.ai/loganluna/YoloV11-25-coco-SGD/runs/8a2qwya2
+Freezing layer 'model.23.dfl.conv.weight'
+AMP: running Automatic Mixed Precision (AMP) checks...
+AMP: checks passed ✅
+train: Scanning C:\VSCode\datasets\coco\labels\train2017.cache... 117265 images, 1021 backgrounds, 1 corrupt: 100%|██████████| 118287/118287 [00:00<?, ?it/s]
+train: WARNING ⚠️ C:\VSCode\datasets\coco\images\train2017\000000099844.jpg: 2 duplicate labels removed
+train: WARNING ⚠️ C:\VSCode\datasets\coco\images\train2017\000000189391.jpg: ignoring corrupt image/label: image file is truncated (44 bytes not processed)
+train: WARNING ⚠️ C:\VSCode\datasets\coco\images\train2017\000000201706.jpg: 1 duplicate labels removed
+train: WARNING ⚠️ C:\VSCode\datasets\coco\images\train2017\000000214087.jpg: 1 duplicate labels removed
+train: WARNING ⚠️ C:\VSCode\datasets\coco\images\train2017\000000522365.jpg: 1 duplicate labels removed
+val: Scanning C:\VSCode\datasets\coco\labels\val2017.cache... 4952 images, 48 backgrounds, 0 corrupt: 100%|██████████| 5000/5000 [00:00<?, ?it/s]
+Plotting labels to YoloV11-25-coco-SGD\SGD-Attempt-Transfer\labels.jpg... 
+optimizer: SGD(lr=0.01, momentum=0.937) with parameter groups 81 weight(decay=0.0), 88 weight(decay=0.0005), 87 bias(decay=0.0)
+Image sizes 640 train, 640 val
+Using 12 dataloader workers
+Logging results to YoloV11-25-coco-SGD\SGD-Attempt-Transfer
+Starting training for 25 epochs...
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       1/25      3.59G      1.269      1.554       1.28        212        640: 100%|██████████| 7393/7393 [18:15<00:00,  6.75it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:21<00:00,  7.40it/s]
+                   all       5000      36335      0.582      0.407       0.44      0.298
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       2/25      4.53G      1.376      1.847      1.359        174        640: 100%|██████████| 7393/7393 [17:28<00:00,  7.05it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.56it/s]
+                   all       5000      36335      0.542      0.395      0.415      0.281
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       3/25      3.46G      1.462      2.088      1.429        193        640: 100%|██████████| 7393/7393 [17:07<00:00,  7.20it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.58it/s]
+                   all       5000      36335      0.537      0.368      0.389      0.263
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       4/25      3.45G       1.47      2.115      1.438        111        640: 100%|██████████| 7393/7393 [17:01<00:00,  7.23it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.57it/s]
+                   all       5000      36335      0.544      0.373      0.402      0.274
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       5/25       3.6G      1.424      1.988      1.405        171        640: 100%|██████████| 7393/7393 [17:00<00:00,  7.24it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.63it/s]
+                   all       5000      36335      0.554      0.396      0.422      0.289
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       6/25      3.65G      1.397      1.921      1.386        251        640: 100%|██████████| 7393/7393 [17:02<00:00,  7.23it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.61it/s]
+                   all       5000      36335      0.565      0.403      0.432      0.297
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       7/25      3.82G       1.38      1.871      1.373        169        640: 100%|██████████| 7393/7393 [17:04<00:00,  7.22it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.53it/s]
+                   all       5000      36335      0.577      0.408      0.439      0.303
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       8/25      3.75G      1.366      1.831      1.362        221        640: 100%|██████████| 7393/7393 [17:06<00:00,  7.20it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.61it/s]
+                   all       5000      36335      0.583      0.408      0.444      0.307
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+       9/25      3.35G      1.354      1.804      1.352        173        640: 100%|██████████| 7393/7393 [17:01<00:00,  7.24it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.65it/s]
+                   all       5000      36335      0.587      0.414      0.448       0.31
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      10/25      4.16G      1.345       1.78      1.345        166        640: 100%|██████████| 7393/7393 [17:03<00:00,  7.22it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.48it/s]
+                   all       5000      36335      0.592      0.417      0.451      0.313
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      11/25      3.66G      1.336      1.751      1.338        193        640: 100%|██████████| 7393/7393 [17:04<00:00,  7.21it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.57it/s]
+                   all       5000      36335      0.589       0.42      0.455      0.316
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      12/25      3.75G      1.328      1.736      1.332        207        640: 100%|██████████| 7393/7393 [17:05<00:00,  7.21it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.56it/s]
+                   all       5000      36335      0.593      0.424      0.459      0.319
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      13/25      3.46G       1.32      1.713      1.326        156        640: 100%|██████████| 7393/7393 [17:05<00:00,  7.21it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.58it/s]
+                   all       5000      36335      0.599      0.425      0.463      0.323
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      14/25      3.45G      1.311      1.695       1.32        128        640: 100%|██████████| 7393/7393 [16:49<00:00,  7.32it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.68it/s]
+                   all       5000      36335      0.611      0.424      0.467      0.325
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      15/25      4.07G      1.301      1.673      1.314        274        640: 100%|██████████| 7393/7393 [16:47<00:00,  7.34it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.69it/s]
+                   all       5000      36335        0.6      0.433      0.471      0.328
+Closing dataloader mosaic
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      16/25      3.28G      1.314        1.6      1.318         77        640: 100%|██████████| 7393/7393 [16:30<00:00,  7.47it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.65it/s]
+                   all       5000      36335      0.595       0.44      0.474      0.331
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      17/25      3.04G      1.302      1.569      1.309        149        640: 100%|██████████| 7393/7393 [16:29<00:00,  7.47it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.60it/s]
+                   all       5000      36335      0.596      0.442      0.477      0.334
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      18/25      3.38G      1.289      1.541      1.299         63        640: 100%|██████████| 7393/7393 [16:32<00:00,  7.45it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.52it/s]
+                   all       5000      36335      0.599      0.448       0.48      0.337
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      19/25      2.87G      1.277      1.513      1.291        117        640: 100%|██████████| 7393/7393 [16:29<00:00,  7.47it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.59it/s]
+                   all       5000      36335      0.596      0.453      0.483       0.34
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      20/25      3.08G      1.263      1.482       1.28         90        640: 100%|██████████| 7393/7393 [16:31<00:00,  7.46it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.65it/s]
+                   all       5000      36335      0.613      0.448      0.486      0.342
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      21/25      3.14G      1.254      1.455      1.273        104        640: 100%|██████████| 7393/7393 [16:28<00:00,  7.48it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.67it/s]
+                   all       5000      36335      0.615      0.449      0.489      0.345
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      22/25      3.24G      1.239      1.423      1.263         62        640: 100%|██████████| 7393/7393 [16:31<00:00,  7.46it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.56it/s]
+                   all       5000      36335      0.618      0.452      0.491      0.347
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      23/25      3.05G      1.227      1.394      1.255        137        640: 100%|██████████| 7393/7393 [16:31<00:00,  7.46it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:20<00:00,  7.57it/s]
+                   all       5000      36335      0.622      0.453      0.493      0.349
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      24/25      3.46G      1.214      1.363      1.245         70        640: 100%|██████████| 7393/7393 [16:30<00:00,  7.46it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:21<00:00,  7.43it/s]
+                   all       5000      36335      0.622      0.454      0.496      0.351
+
+      Epoch    GPU_mem   box_loss   cls_loss   dfl_loss  Instances       Size
+      25/25      3.15G        1.2      1.333      1.235         56        640: 100%|██████████| 7393/7393 [16:29<00:00,  7.47it/s]
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:19<00:00,  7.98it/s]
+                   all       5000      36335      0.627      0.451      0.497      0.352
+
+25 epochs completed in 7.200 hours.
+Optimizer stripped from YoloV11-25-coco-SGD\SGD-Attempt-Transfer\weights\last.pt, 5.5MB
+Optimizer stripped from YoloV11-25-coco-SGD\SGD-Attempt-Transfer\weights\best.pt, 5.5MB
+
+Validating YoloV11-25-coco-SGD\SGD-Attempt-Transfer\weights\best.pt...
+Ultralytics 8.3.79 🚀 Python-3.12.6 torch-2.6.0+cu126 CUDA:0 (NVIDIA GeForce RTX 3060, 12288MiB)
+YOLO11n summary (fused): 100 layers, 2,616,248 parameters, 0 gradients, 6.5 GFLOPs
+                 Class     Images  Instances      Box(P          R      mAP50  mAP50-95): 100%|██████████| 157/157 [00:23<00:00,  6.55it/s]
+                   all       5000      36335      0.626      0.452      0.498      0.352
+                person       2693      10777      0.755      0.645      0.723      0.492
+               bicycle        149        314       0.65      0.389      0.433      0.249
+                   car        535       1918      0.632      0.496      0.534      0.339
+            motorcycle        159        367      0.719       0.54      0.628      0.395
+              airplane         97        143      0.745      0.748      0.813      0.637
+                   bus        189        283      0.754      0.657      0.728      0.603
+                 train        157        190      0.793      0.774      0.837      0.663
+                 truck        250        414      0.573      0.394      0.434      0.293
+                  boat        121        424      0.608      0.314      0.374      0.192
+         traffic light        191        634      0.586      0.301      0.354      0.184
+          fire hydrant         86        101      0.886      0.723      0.777      0.611
+             stop sign         69         75      0.684        0.6      0.655      0.591
+         parking meter         37         60      0.777       0.45      0.555      0.412
+                 bench        235        411      0.564      0.252       0.29       0.19
+                  bird        125        427      0.658      0.333      0.404      0.261
+                   cat        184        202      0.771      0.797      0.843      0.665
+                   dog        177        218      0.702      0.679      0.735      0.602
+                 horse        128        272      0.737      0.659      0.737      0.549
+                 sheep         65        354      0.678      0.648      0.679      0.461
+                   cow         87        372      0.674      0.599      0.661      0.462
+              elephant         89        252      0.663      0.853      0.827       0.62
+                  bear         49         71      0.781      0.732      0.813      0.664
+                 zebra         85        266      0.776      0.819      0.874      0.647
+               giraffe        101        232      0.827      0.806      0.855      0.663
+              backpack        228        371      0.457      0.102      0.142     0.0734
+              umbrella        174        407      0.579      0.482        0.5      0.322
+               handbag        292        540      0.397     0.0704      0.119     0.0624
+                   tie        145        252      0.629      0.317      0.385      0.246
+              suitcase        105        299      0.502      0.425      0.423      0.286
+               frisbee         84        115       0.77      0.696      0.757      0.593
+                  skis        120        241      0.613      0.308      0.353      0.187
+             snowboard         49         69      0.588      0.261      0.345      0.228
+           sports ball        169        260      0.681      0.408      0.453      0.323
+                  kite         91        327      0.599      0.532       0.55      0.354
+          baseball bat         97        145      0.545      0.306      0.351      0.198
+        baseball glove        100        148      0.571      0.419      0.461      0.278
+            skateboard        127        179      0.717      0.595      0.617      0.421
+             surfboard        149        267      0.619      0.443      0.488      0.299
+         tennis racket        167        225      0.687      0.582      0.643      0.372
+                bottle        379       1013      0.614      0.373      0.426      0.281
+            wine glass        110        341      0.678      0.299       0.38      0.253
+                   cup        390        895      0.546      0.415      0.455       0.33
+                  fork        155        215      0.554       0.26      0.328      0.228
+                 knife        181        325      0.424     0.0923      0.136     0.0785
+                 spoon        153        253      0.397     0.0751     0.0988     0.0576
+                  bowl        314        623      0.586      0.474      0.499      0.371
+                banana        103        370      0.547      0.278      0.329      0.211
+                 apple         76        236      0.423      0.174      0.182       0.12
+              sandwich         98        177      0.516      0.412      0.436      0.312
+                orange         85        285      0.439      0.344      0.346      0.272
+              broccoli         71        312      0.488      0.314      0.353      0.198
+                carrot         81        365      0.434      0.203      0.231      0.144
+               hot dog         51        125      0.586      0.416      0.424      0.286
+                 pizza        153        284      0.681      0.615      0.655      0.491
+                 donut         62        328      0.551      0.485      0.513      0.396
+                  cake        124        310      0.633       0.41      0.489      0.331
+                 chair        580       1771      0.555      0.321      0.376      0.233
+                 couch        195        261       0.58      0.563      0.603      0.438
+          potted plant        172        342      0.505      0.357      0.352      0.197
+                   bed        149        163      0.589      0.563       0.61       0.44
+          dining table        501        695      0.508      0.439      0.427      0.304
+                toilet        149        179      0.693      0.756      0.788      0.626
+                    tv        207        288      0.717      0.597      0.675      0.516
+                laptop        183        231      0.683      0.634      0.664      0.537
+                 mouse         88        106      0.701      0.619      0.657      0.487
+                remote        145        283      0.459      0.208      0.246      0.144
+              keyboard        106        153      0.606      0.562      0.619      0.463
+            cell phone        214        262      0.576      0.324       0.36      0.254
+             microwave         54         55      0.614      0.578      0.626      0.494
+                  oven        115        143      0.613      0.433      0.485      0.321
+               toaster          8          9          1      0.181      0.452      0.301
+                  sink        187        225      0.628      0.467      0.513      0.343
+          refrigerator        101        126      0.709      0.595      0.652        0.5
+                  book        230       1129      0.478     0.0868      0.169     0.0786
+                 clock        204        267      0.676      0.622      0.638      0.445
+                  vase        137        274      0.535       0.42      0.425      0.278
+              scissors         28         36      0.484      0.306      0.277      0.207
+            teddy bear         94        190      0.689      0.574      0.597      0.421
+            hair drier          9         11          1          0          0          0
+            toothbrush         34         57       0.41       0.14      0.164      0.104
+Speed: 0.1ms preprocess, 1.2ms inference, 0.0ms loss, 0.6ms postprocess per image
+Saving YoloV11-25-coco-SGD\SGD-Attempt-Transfer\predictions.json...
+
+Evaluating pycocotools mAP using YoloV11-25-coco-SGD\SGD-Attempt-Transfer\predictions.json and C:\VSCode\datasets\coco\annotations\instances_val2017.json...
+loading annotations into memory...
+Done (t=0.26s)
+creating index...
+index created!
+Loading and preparing results...
+DONE (t=2.92s)
+creating index...
+index created!
+Running per image evaluation...
+Evaluate annotation type *bbox*
+DONE (t=18.78s).
+Accumulating evaluation results...
+DONE (t=4.19s).
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.353
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.501
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.384
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.172
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.387
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.510
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.307
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.511
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.569
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.339
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.630
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.762
+Results saved to YoloV11-25-coco-SGD\SGD-Attempt-Transfer
+wandb:
+wandb:                                                                                                                                                                                                                                                                                               
+wandb: Run history:
+wandb:                  lr/pg0 █▅▂▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                  lr/pg1 ▃▆██▇▇▇▆▆▆▅▅▅▅▄▄▄▃▃▃▂▂▂▁▁
+wandb:                  lr/pg2 ▃▆██▇▇▇▆▆▆▅▅▅▅▄▄▄▃▃▃▂▂▂▁▁
+wandb:        metrics/mAP50(B) ▄▃▁▂▃▄▄▄▅▅▅▅▆▆▆▆▆▇▇▇▇▇▇██
+wandb:     metrics/mAP50-95(B) ▄▂▁▂▃▄▄▄▅▅▅▅▆▆▆▆▇▇▇▇▇▇███
+wandb:    metrics/precision(B) ▅▁▁▂▂▃▄▅▅▅▅▅▆▇▆▆▆▆▆▇▇▇███
+wandb:       metrics/recall(B) ▄▃▁▁▃▄▄▄▅▅▅▆▆▆▆▇▇████████
+wandb:            model/GFLOPs ▁
+wandb:        model/parameters ▁
+wandb: model/speed_PyTorch(ms) ▁
+wandb:          train/box_loss ▃▆██▇▆▆▅▅▅▅▄▄▄▄▄▄▃▃▃▂▂▂▁▁
+wandb:          train/cls_loss ▃▆██▇▆▆▅▅▅▅▅▄▄▄▃▃▃▃▂▂▂▂▁▁
+wandb:          train/dfl_loss ▃▅██▇▆▆▅▅▅▅▄▄▄▄▄▄▃▃▃▂▂▂▁▁
+wandb:            val/box_loss ▅▇█▇▆▅▄▄▄▃▃▃▃▃▃▂▂▂▂▂▁▁▁▁▁
+wandb:            val/cls_loss ▅▆█▇▆▅▅▄▄▄▃▃▃▃▂▂▂▂▂▂▁▁▁▁▁
+wandb:            val/dfl_loss ▄▆█▇▆▅▅▄▄▄▄▃▃▃▃▃▂▂▂▂▂▁▁▁▁
+wandb:
+wandb: Run summary:
+wandb:                  lr/pg0 0.0005
+wandb:                  lr/pg1 0.0005
+wandb:                  lr/pg2 0.0005
+wandb:     metrics/mAP50-95(B) 0.35345
+wandb:    metrics/precision(B) 0.62565
+wandb:       metrics/recall(B) 0.45171
+wandb:            model/GFLOPs 6.614
+wandb:        model/parameters 2624080
+wandb: model/speed_PyTorch(ms) 1.366
+wandb:          train/box_loss 1.19964
+wandb:          train/cls_loss 1.33269
+wandb:          train/dfl_loss 1.23548
+wandb:            val/box_loss 1.14486
+wandb:            val/cls_loss 1.2549
+wandb:            val/dfl_loss 1.17192
+wandb:
+wandb:  View run SGD-Attempt-Transfer at: https://wandb.ai/loganluna/YoloV11-25-coco-SGD/runs/8a2qwya2
+wandb:  View project at: https://wandb.ai/loganluna/YoloV11-25-coco-SGD
+wandb: Synced 5 W&B file(s), 24 media file(s), 10 artifact file(s) and 0 other file(s)
+wandb: Find logs at: .\wandb\run-20250228_080319-8a2qwya2\logs
+💡 Learn more at https://docs.ultralytics.com/modes/train
+VS Code: view Ultralytics VS Code Extension ⚡ at https://docs.ultralytics.com/integrations/vscode
+C:\VSCode\ultralytics> [GGD | f0665bb5 | Up-to-date]

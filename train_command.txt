@@ -1,5 +1,6 @@
 yolo train data=coco128.yaml model=yolov8n.pt optimizer=GGD epochs=10 project=YoloV8cocoGGD name=Attempt plots=True visualize=True
 
+
 yolo train data=coco128.yaml model=yolov8n.pt optimizer=Adam epochs=10 project=YoloV8cocoAdam name=Attempt plots=True visualize=True
 
 
@@ -8,3 +9,23 @@ yolo train data=coco128.yaml model=yolov8n.pt optimizer=Adam epochs=10 project=Y
 yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo12n.pt optimizer=GGD epochs=5 project=YoloV12-coco-GGD name=Attempt plots=True visualize=True
 
 yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo12n.pt optimizer=Adam epochs=5 project=YoloV12-coco-Adam name=Attempt plots=True visualize=True
+
+
+25 Epochs Transfer YOLO V10:
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.pt optimizer=GGD epochs=25 project=YoloV11-25-coco name=GGD-Attempt-Transfer plots=True visualize=True imgsz=640 workers=12
+
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.pt optimizer=AdamW epochs=25 project=YoloV11-25-coco name=AdamW-Attempt-Transfer plots=True visualize=True imgsz=640 workers=12
+
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.pt optimizer=SGD epochs=25 project=YoloV11-25-coco name=SGD-Attempt-Transfer plots=True visualize=True imgsz=640 workers=12
+
+
+25 Epochs No Transfer YOLO V10:
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.yaml optimizer=GGD epochs=25 project=YoloV11-25-coco name=GGD-No-Transfer plots=True visualize=True imgsz=640 workers=12
+
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.yaml optimizer=AdamW epochs=25 project=YoloV11-25-coco name=Adamw-No-Transfer plots=True visualize=True imgsz=640 workers=12
+
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.yaml optimizer=SGD epochs=25 project=YoloV11-25-coco name=SGD-No-Transfer plots=True visualize=True imgsz=640 workers=12
+
+
+
+yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.yaml optimizer=GGD epochs=25 project=YoloV11-25-coco name=GGD-No-Transfer plots=True visualize=True imgsz=640 workers=12 ; yolo train data=C:/VSCode/datasets/coco/coco.yaml model=yolo11n.yaml optimizer=AdamW epochs=25 project=YoloV11-25-coco name=Adamw-No-Transfer plots=True visualize=True imgsz=640 workers=12
