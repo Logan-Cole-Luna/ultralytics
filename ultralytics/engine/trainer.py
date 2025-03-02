@@ -811,8 +811,28 @@ class BaseTrainer:
         elif name == "SGD":
             optimizer = optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
         elif name == "GGD":
+            # Import GroupGradientDescent optimizer
             from ultralytics.engine.GroupGradientDescent import GroupGradientDescent
-            optimizer = GroupGradientDescent(g[2], lr=lr, momentum=momentum, adaptive=True)
+            
+            # Configuration for GroupGradientDescent optimizer
+            # For large models like YOLOv11n on COCO dataset:
+            # 1. layer_wise=True: Group parameters by layer rather than fixed sizes
+            # 2. group_size=128: When layer_wise=False, use larger group size (128-512 recommended)
+            # 3. adaptive=True: Enable adaptive gradient scaling similar to Adam/RMSProp
+            # 4. clip_grad_norm=1.0: Clip gradients to prevent exploding gradients
+            # 5. adaptive_lr=False: Set to True for datasets with varied gradient magnitudes
+            optimizer = GroupGradientDescent(
+                g[2],  # bias parameters
+                lr=lr,
+                momentum=momentum,
+                adaptive=True,      # Enable adaptive scaling
+                adaptive_eps=1e-8,  # Small constant for numerical stability
+                layer_wise=True,    # Use layer-wise grouping for large models
+                clip_grad_norm=1.0, # Clip gradients to prevent explosion
+                adaptive_lr=False,  # Optional: enable for varied gradient magnitudes
+                # When layer_wise=False, use an appropriate group size:
+                #group_size=128 if not True else None,  # Only used when layer_wise=False
+            )
         else:
             raise NotImplementedError(
                 f"Optimizer '{name}' not found in list of available optimizers {optimizers}. "
