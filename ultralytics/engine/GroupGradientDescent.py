@@ -50,6 +50,10 @@ class GroupGradientDescent(Optimizer):
                                          Helps prevent exploding gradients.
         adaptive_lr (bool, optional): Whether to use adaptive learning rate (default: False)
                                      Adjusts learning rate based on the square root of sum of squared gradients.
+        max_group_size (int, optional): Maximum parameters per sub-group (default: 10000)
+        scale_aware (bool, optional): Whether to use scale-aware normalization (default: False)
+                                     Preserves some magnitude information by mixing original gradients with normalized gradients.
+        scale_factor (float, optional): Mix factor for scale-aware normalization (default: 0.1)
 
     Mathematical formulation:
         1. Group parameters (by fixed size or by layer)
@@ -62,13 +66,41 @@ class GroupGradientDescent(Optimizer):
         6. Update parameters: w_t = w_{t-1} - η*v'_t
            (where η may be adjusted by adaptive_lr if enabled)
     """
-    def __init__(self, params, lr=1e-3, group_size=None, num_groups=None, eps=1e-5, 
-                 momentum=0, adaptive=False, adaptive_eps=1e-8, weight_decay=0,
-                 layer_wise=False, clip_grad_norm=None, adaptive_lr=False):
-        defaults = dict(lr=lr, group_size=group_size, num_groups=num_groups, eps=eps, 
-                        momentum=momentum, adaptive=adaptive, adaptive_eps=adaptive_eps, 
-                        weight_decay=weight_decay, layer_wise=layer_wise,
-                        clip_grad_norm=clip_grad_norm, adaptive_lr=adaptive_lr)
+    def __init__(
+                 self,
+                 params, 
+                 lr=1e-3, 
+                 group_size=None, 
+                 num_groups=None, 
+                 eps=1e-5,
+                 momentum=0, 
+                 adaptive=False, 
+                 adaptive_eps=1e-8, 
+                 weight_decay=0,
+                 layer_wise=True, 
+                 clip_grad_norm=None, 
+                 adaptive_lr=False,
+                 max_group_size=10000,
+                 scale_aware=False,
+                 scale_factor=0.1):
+        
+        defaults = dict(
+            lr=lr, 
+            group_size=group_size, 
+            num_groups=num_groups, 
+            eps=eps,
+            momentum=momentum, 
+            adaptive=adaptive, 
+            adaptive_eps=adaptive_eps,
+            weight_decay=weight_decay, 
+            layer_wise=layer_wise,
+            clip_grad_norm=clip_grad_norm, 
+            adaptive_lr=adaptive_lr,
+            max_group_size=max_group_size,
+            scale_aware=scale_aware,
+            scale_factor=scale_factor
+        )
+        
         super(GroupGradientDescent, self).__init__(params, defaults)
         
         # If layer_wise is True, organize parameters by layer
@@ -84,7 +116,7 @@ class GroupGradientDescent(Optimizer):
         2. Creating a mapping from layer name to index
         3. Assigning each parameter to its corresponding layer index
         
-        This enables layer-wise normalization where gradients from the same 
+        This enables layer-wise normalization where gradients from the same
         logical layer are normalized together, preserving intra-layer relationships.
         """
         self.param_to_layer = {}
@@ -137,6 +169,9 @@ class GroupGradientDescent(Optimizer):
             layer_wise = group.get('layer_wise', False)
             clip_grad_norm = group.get('clip_grad_norm')
             adaptive_lr_flag = group.get('adaptive_lr', False)
+            max_group_size = group.get('max_group_size', 10000)
+            scale_aware = group.get('scale_aware', False)
+            scale_factor = group.get('scale_factor', 0.1)
             
             if layer_wise:
                 # For layer-wise grouping, process each layer separately
@@ -167,13 +202,35 @@ class GroupGradientDescent(Optimizer):
                     if all_grads:
                         layer_grad = torch.cat(all_grads)
                         
-                        # Normalize the entire layer's gradients
-                        # μ = mean of all gradients in the layer
-                        layer_mean = layer_grad.mean()
-                        # σ = standard deviation of all gradients in the layer
-                        layer_std = layer_grad.std() + eps  # Add eps for numerical stability
-                        # g' = (g - μ)/σ for all gradients in the layer
-                        normalized_layer_grad = (layer_grad - layer_mean) / layer_std
+                        # Split large layers into sub-groups if needed
+                        if layer_grad.numel() > max_group_size:
+                            # Divide into sub-groups
+                            num_subgroups = (layer_grad.numel() + max_group_size - 1) // max_group_size
+                            subgroups = layer_grad.view(num_subgroups, -1)
+                            
+                            # Normalize each sub-group separately
+                            sub_means = subgroups.mean(dim=1, keepdim=True)
+                            sub_stds = subgroups.std(dim=1, keepdim=True) + eps
+                            
+                            if scale_aware:
+                                # Scale-aware normalization preserves some magnitude information
+                                normalized_subgroups = scale_factor * subgroups + (1 - scale_factor) * (
+                                    (subgroups - sub_means) / sub_stds)
+                            else:
+                                normalized_subgroups = (subgroups - sub_means) / sub_stds
+                            
+                            # Reshape back to original
+                            normalized_layer_grad = normalized_subgroups.view(-1)[:layer_grad.numel()]
+                        else:
+                            # Standard normalization for smaller layers
+                            layer_mean = layer_grad.mean()
+                            layer_std = layer_grad.std() + eps
+                            
+                            if scale_aware:
+                                normalized_layer_grad = scale_factor * layer_grad + (1 - scale_factor) * (
+                                    (layer_grad - layer_mean) / layer_std)
+                            else:
+                                normalized_layer_grad = (layer_grad - layer_mean) / layer_std
                         
                         # Distribute normalized gradients back to parameters
                         start_idx = 0
@@ -277,7 +334,11 @@ class GroupGradientDescent(Optimizer):
 
                     # Normalize each group using its mean and std
                     # For each element x in group i: x' = (x - μᵢ)/(σᵢ)
-                    normalized = (reshaped - group_mean) / group_std
+                    if scale_aware:
+                        normalized = scale_factor * reshaped + (1 - scale_factor) * (
+                            (reshaped - group_mean) / group_std)
+                    else:
+                        normalized = (reshaped - group_mean) / group_std
 
                     # Convert back to 1D and remove any padding we added
                     # Only keep the first N elements (original gradient size)
@@ -307,7 +368,7 @@ class GroupGradientDescent(Optimizer):
                         adaptive_buf = buf / (state['sum_sq_grad'].sqrt() + adaptive_eps)
                     else:
                         adaptive_buf = buf
-                    
+
                     # Handle adaptive learning rate
                     if adaptive_lr_flag:
                         if 'sum_sq_lr' not in state:

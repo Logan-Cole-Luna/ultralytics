@@ -811,27 +811,29 @@ class BaseTrainer:
         elif name == "SGD":
             optimizer = optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
         elif name == "GGD":
-            # Import GroupGradientDescent optimizer
-            from ultralytics.engine.GroupGradientDescent import GroupGradientDescent
+            # Import NormalizedSGD optimizer
+            from ultralytics.engine.NormalizedSGD import NormalizedSGD
             
-            # Configuration for GroupGradientDescent optimizer
-            # For large models like YOLOv11n on COCO dataset:
-            # 1. layer_wise=True: Group parameters by layer rather than fixed sizes
-            # 2. group_size=128: When layer_wise=False, use larger group size (128-512 recommended)
-            # 3. adaptive=True: Enable adaptive gradient scaling similar to Adam/RMSProp
-            # 4. clip_grad_norm=1.0: Clip gradients to prevent exploding gradients
-            # 5. adaptive_lr=False: Set to True for datasets with varied gradient magnitudes
-            optimizer = GroupGradientDescent(
+            # Configuration for NormalizedSGD optimizer with gradient normalization
+            # For large models like YOLO on COCO dataset:
+            # 1. normalize=True: Enable gradient normalization
+            # 2. layer_wise=True: Group parameters by layer for more meaningful normalization
+            # 3. scale_aware=True: Preserve some gradient magnitude information
+            # 4. scale_factor=0.2: Mix 20% original gradient, 80% normalized gradient
+            # 5. adaptive=True: Apply adaptive scaling similar to RMSprop/Adam
+            # 6. clip_norm=1.0: Clip gradients to prevent explosion
+            optimizer = NormalizedSGD(
                 g[2],  # bias parameters
                 lr=lr,
                 momentum=momentum,
-                adaptive=True,      # Enable adaptive scaling
-                adaptive_eps=1e-8,  # Small constant for numerical stability
-                layer_wise=True,    # Use layer-wise grouping for large models
-                clip_grad_norm=1.0, # Clip gradients to prevent explosion
-                adaptive_lr=False,  # Optional: enable for varied gradient magnitudes
-                # When layer_wise=False, use an appropriate group size:
-                #group_size=128 if not True else None,  # Only used when layer_wise=False
+                weight_decay=0.0,  # We'll add weight decay in param groups
+                normalize=True,
+                layer_wise=True,
+                scale_aware=True,
+                scale_factor=0.2,
+                max_group_size=5000,
+                adaptive=True,
+                clip_norm=1.0
             )
         else:
             raise NotImplementedError(
