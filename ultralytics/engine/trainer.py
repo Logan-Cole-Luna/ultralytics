@@ -811,8 +811,27 @@ class BaseTrainer:
         elif name == "SGD":
             optimizer = optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
         elif name == "GGD":
-            # Import NormalizedSGD optimizer
-            from ultralytics.engine.NormalizedSGD import NormalizedSGD
+            # Import NormalizedSGD optimizer with fallback mechanism
+            try:
+                # First try the standard package path
+                from ultralytics.engine.NormalizedSGD import NormalizedSGD
+            except ImportError:
+                try:
+                    # Try relative import if in same directory
+                    from .NormalizedSGD import NormalizedSGD
+                except ImportError:
+                    # Last resort: try direct import if file is in the Python path
+                    import sys
+                    import os
+                    # Add the directory containing NormalizedSGD.py to the Python path
+                    file_dir = os.path.dirname(os.path.abspath(__file__))
+                    if file_dir not in sys.path:
+                        sys.path.append(file_dir)
+                    try:
+                        from NormalizedSGD import NormalizedSGD
+                    except ImportError:
+                        LOGGER.error(f"Failed to import NormalizedSGD. Falling back to SGD.")
+                        return optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
             
             # Configuration for NormalizedSGD optimizer with gradient normalization
             # For large models like YOLO on COCO dataset:

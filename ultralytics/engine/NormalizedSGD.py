@@ -173,6 +173,36 @@ class NormalizedSGD(Optimizer):  # noqa: D101
             group.setdefault("adaptive", False)
             group.setdefault("adaptive_eps", 1e-8)
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        new_state = {}
+        for key, value in state.get("state", {}).items():
+            new_state[key] = {}
+            for sub_key, sub_val in value.items():
+                if torch.is_tensor(sub_val):
+                    new_state[key][sub_key] = sub_val.detach().clone()
+                else:
+                    new_state[key][sub_key] = sub_val
+        state["state"] = new_state
+        return state
+
+    def sanitize_state(self):
+        """Ensure every tensor in optimizer state is a detached leaf tensor."""
+        for param, state_dict in self.state.items():
+            for key, val in state_dict.items():
+                if torch.is_tensor(val):
+                    state_dict[key] = val.detach().clone()
+
+    def __deepcopy__(self, memo):
+        # Sanitize state before copying
+        self.sanitize_state()
+        state = self.__getstate__()
+        cls = self.__class__
+        new_obj = cls.__new__(cls)
+        memo[id(self)] = new_obj
+        new_obj.__dict__.update(state)
+        return new_obj
+
     def _init_group(self, group, params, grads, momentum_buffer_list):
         has_sparse_grad = False
 
@@ -644,3 +674,16 @@ class NormalizedSGD(Optimizer):  # noqa: D101
                         state['sum_sq_grad'] = device_grads[i].detach().pow(2)
                     else:
                         state['sum_sq_grad'].add_(device_grads[i].detach().pow(2))
+
+    def state_dict(self):
+        # Get the original state dict from parent
+        orig_state = super().state_dict()
+        sanitized_state = {}
+        for key, state_val in orig_state.get("state", {}).items():
+            # Recursively sanitize each state's value
+            sanitized_state[key] = {
+                sub_key: (sub_val.detach().clone() if torch.is_tensor(sub_val) else sub_val)
+                for sub_key, sub_val in state_val.items()
+            }
+        orig_state["state"] = sanitized_state
+        return orig_state
