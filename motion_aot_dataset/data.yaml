@@ -1,0 +1,6 @@
+names:
+  0: airborne_object
+nc: 1
+path: C:\VSCode\ultralytics\motion_aot_dataset
+train: images/train
+val: images/val

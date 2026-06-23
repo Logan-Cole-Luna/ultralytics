@@ -6,6 +6,13 @@ __pycache__/
 # C extensions
 *.so
 
+venv*
+
+part1/ImageSets/groundtruth.csv
+part1/ImageSets/groundtruth.json
+part1/ImageSets/valid_encounters_maxRange700_maxGap3_minEncLen30.csv
+part1/ImageSets/valid_encounters_maxRange700_maxGap3_minEncLen30.json
+
 # Distribution / packaging
 .Python
 build/
@@ -26,7 +33,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-requirements.txt
 !examples/**/requirements.txt
 setup.py
 ultralytics.egg-info
