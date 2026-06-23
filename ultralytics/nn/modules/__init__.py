@@ -60,6 +60,7 @@ from .block import (
     SCDown,
     TorchVision,
 )
+from .motion import MotionCrossAttention, MotionEncoder
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -110,6 +111,8 @@ from .transformer import (
 __all__ = (
     "AIFI",
     "C1",
+    "MotionCrossAttention",
+    "MotionEncoder",
     "C2",
     "C2PSA",
     "C3",

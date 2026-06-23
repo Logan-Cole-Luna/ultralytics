@@ -408,6 +408,109 @@ class YOLOMultiModalDataset(YOLODataset):
         return [k for k, v in category_freq.items() if v >= threshold]
 
 
+class MotionYOLODataset(YOLODataset):
+    """YOLODataset that additionally loads a motion-difference image alongside each current frame.
+
+    A frame-difference (motion) image is loaded from a ``motion`` directory that sits beside the
+    ``images`` directory in the dataset tree.  When the motion image is absent, a zero tensor is
+    returned so that training can start from a standard YOLO dataset with no motion directory yet.
+
+    Directory convention::
+
+        <dataset_root>/
+          images/<split>/<name>.jpg   ← current frame (standard YOLO)
+          motion/<split>/<name>.jpg   ← absolute frame difference (same filename)
+          labels/<split>/<name>.txt
+
+    Mosaic, mixup, and cutmix augmentations are disabled because merging clips from independent
+    sequences would produce incoherent motion fields.
+
+    The ``motion`` tensor in each batch item is a uint8 CHW tensor (0–255) that is normalised to
+    float [0, 1] inside the trainer's / validator's ``preprocess_batch``.
+
+    Examples:
+        >>> ds = MotionYOLODataset(img_path="data/images/train", data={"names": {0: "car"}}, task="detect")
+        >>> item = ds[0]
+        >>> item["motion"].shape  # (3, H, W) uint8 tensor
+    """
+
+    def get_image_and_label(self, index: int) -> dict:
+        """Load image, label, and corresponding motion-difference image."""
+        label = super().get_image_and_label(index)
+        h, w = label["img"].shape[:2]
+        label["motion"] = self._load_motion(self.im_files[index], (h, w))
+        return label
+
+    def _load_motion(self, im_file: str, hw: tuple) -> np.ndarray:
+        """Load the motion-difference image for *im_file*, falling back to zeros.
+
+        Args:
+            im_file (str): Absolute path to the current frame image.
+            hw (tuple[int, int]): Target (height, width) to resize the motion image to.
+
+        Returns:
+            (np.ndarray): HWC BGR uint8 motion image, or zeros if not found.
+        """
+        motion_path = self._motion_path(im_file)
+        if motion_path is not None and Path(motion_path).exists():
+            mot = cv2.imread(motion_path)
+            if mot is not None:
+                if mot.ndim == 2:
+                    mot = cv2.cvtColor(mot, cv2.COLOR_GRAY2BGR)
+                if mot.shape[:2] != hw:
+                    mot = cv2.resize(mot, (hw[1], hw[0]))
+                return mot
+        return np.zeros((hw[0], hw[1], 3), dtype=np.uint8)
+
+    @staticmethod
+    def _motion_path(im_file: str) -> str | None:
+        """Derive the motion image path by replacing 'images' with 'motion' in the path.
+
+        Returns:
+            (str | None): Motion image path, or None if 'images' is not in the path.
+        """
+        import os
+
+        parts = im_file.replace("\\", "/").split("/")
+        for i, part in enumerate(parts):
+            if part == "images":
+                parts[i] = "motion"
+                joined = "/".join(parts)
+                return joined.replace("/", os.sep)
+        return None
+
+    def __getitem__(self, index: int) -> dict:
+        """Return a transformed sample with the motion field converted to a CHW uint8 tensor."""
+        item = super().__getitem__(index)
+        if "motion" in item and isinstance(item["motion"], np.ndarray):
+            mot = item["motion"]
+            # Resize to match the final letterboxed/augmented image shape (C, H, W)
+            h, w = item["img"].shape[1:]
+            if mot.shape[:2] != (h, w):
+                mot = cv2.resize(mot, (w, h))
+            item["motion"] = torch.from_numpy(np.ascontiguousarray(mot.transpose(2, 0, 1)))
+        return item
+
+    def build_transforms(self, hyp: dict | None = None) -> Compose:
+        """Disable mosaic/mixup/cutmix and build standard transforms for temporal consistency."""
+        if self.augment and hyp is not None:
+            from copy import copy as _copy
+
+            hyp = _copy(hyp)
+            hyp.mosaic = 0.0
+            hyp.mixup = 0.0
+            hyp.cutmix = 0.0
+        return super().build_transforms(hyp)
+
+    @staticmethod
+    def collate_fn(batch: list[dict]) -> dict:
+        """Collate a list of sample dicts into a batch dict, stacking motion tensors."""
+        new_batch = YOLODataset.collate_fn(batch)
+        if "motion" in batch[0]:
+            new_batch["motion"] = torch.stack([b["motion"] for b in batch])
+        return new_batch
+
+
 class GroundingDataset(YOLODataset):
     """Dataset class for object detection tasks using annotations from a JSON file in grounding format.
 

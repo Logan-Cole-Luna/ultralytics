@@ -520,6 +520,163 @@ class DetectionModel(BaseModel):
         return E2ELoss(self) if getattr(self, "end2end", False) else v8DetectionLoss(self)
 
 
+class MotionDetectionModel(DetectionModel):
+    """YOLOv8 detection model extended with motion cross-attention for video object detection.
+
+    Accepts a 'motion' tensor (absolute frame difference) alongside the current frame and fuses
+    motion cues into backbone features (P3, P4, P5) via cross-attention before the detection head.
+    A lightweight MotionEncoder processes the motion image; MotionCrossAttention modules integrate
+    the resulting features into the main stream using a learned gate that starts at zero.
+
+    Attributes:
+        inject_layers (list[int]): Backbone layer indices after which cross-attention is applied.
+        motion_feat_scales (list[int]): MotionEncoder output stage (0-indexed) used at each inject point.
+        motion_encoder (MotionEncoder): Lightweight CNN that encodes the motion-difference image.
+        cross_attns (nn.ModuleList): MotionCrossAttention modules, one per inject point.
+
+    YAML motion section (consumed here, not by parse_model):
+        motion:
+          channels: 3               # motion diff image channels
+          dims: [32, 64, 128, 256]  # encoder output channels per stage
+          inject_layers: [4, 6, 9]  # backbone layer indices (P3, P4, P5+SPPF)
+          motion_feat_scales: [2, 3, 3]  # which encoder stage feeds each inject point
+
+    Examples:
+        >>> model = MotionDetectionModel("yolov8-motion.yaml", ch=3, nc=80)
+        >>> batch = {"img": torch.zeros(2, 3, 640, 640), "motion": torch.zeros(2, 3, 640, 640)}
+        >>> loss, items = model(batch)
+    """
+
+    def __init__(self, cfg="yolov8-motion.yaml", ch: int = 3, nc: int | None = None, verbose: bool = True):
+        """Initialise the motion-aware detection model.
+
+        Args:
+            cfg (str | dict): Model configuration file path or dictionary.
+            ch (int): Number of input channels for the current frame.
+            nc (int, optional): Number of object classes.
+            verbose (bool): Whether to display model information.
+        """
+        from ultralytics.nn.modules.motion import MotionCrossAttention, MotionEncoder
+
+        # Guard used in _predict_once to skip motion stream during stride computation
+        self._motion_ready = False
+        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
+
+        # Read motion-stream config from YAML (ignored by parse_model)
+        motion_cfg = self.yaml.get("motion", {})
+        motion_ch: int = motion_cfg.get("channels", 3)
+        encoder_dims: list = motion_cfg.get("dims", [32, 64, 128, 256])
+        self.inject_layers: list = motion_cfg.get("inject_layers", [4, 6, 9])
+        self.motion_feat_scales: list = motion_cfg.get("motion_feat_scales", [2, 3, 3])
+
+        # Build motion encoder
+        self.motion_encoder = MotionEncoder(in_channels=motion_ch, dims=encoder_dims)
+
+        # Probe channel counts at inject points and at each encoder output
+        curr_channels = self._get_inject_channels(ch)
+        with torch.no_grad():
+            dummy_enc = self.motion_encoder(torch.zeros(1, motion_ch, 256, 256))
+        motion_channels = [dummy_enc[s].shape[1] for s in self.motion_feat_scales]
+
+        self.cross_attns = nn.ModuleList(
+            MotionCrossAttention(cc, mc, num_heads=4) for cc, mc in zip(curr_channels, motion_channels)
+        )
+        self._motion_ready = True
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_inject_channels(self, ch: int) -> list[int]:
+        """Return the channel count of the feature map produced after each inject layer."""
+        channels: list[int] = []
+        with torch.no_grad():
+            dummy = torch.zeros(1, ch, 256, 256)
+            y: list = []
+            x = dummy
+            for m in self.model:
+                x_in = y[m.f] if isinstance(m.f, int) and m.f != -1 else (
+                    [x if j == -1 else y[j] for j in m.f] if isinstance(m.f, list) else x
+                )
+                x = m(x_in)
+                y.append(x if m.i in self.save else None)
+                if m.i in self.inject_layers:
+                    feat = x[0] if isinstance(x, (list, tuple)) else x
+                    channels.append(feat.shape[1])
+                if len(channels) == len(self.inject_layers):
+                    break
+        return channels
+
+    # ------------------------------------------------------------------
+    # Forward overrides
+    # ------------------------------------------------------------------
+
+    def forward(self, x, *args, **kwargs):
+        """Route to loss (dict input) or predict (tensor input), threading motion through."""
+        if isinstance(x, dict):
+            return self.loss(x, *args, **kwargs)
+        motion = kwargs.pop("motion", None)
+        return self.predict(x, motion=motion, *args, **kwargs)
+
+    def predict(self, x, profile=False, visualize=False, augment=False, embed=None, motion=None):
+        """Run single-scale or augmented inference, optionally fusing a motion tensor."""
+        if augment:
+            return self._predict_augment(x)
+        return self._predict_once(x, profile, visualize, embed, motion=motion)
+
+    def _predict_once(self, x, profile=False, visualize=False, embed=None, motion=None):
+        """Forward pass with optional motion cross-attention fusion at backbone outputs.
+
+        When ``self._motion_ready`` is False (during stride initialisation) or when
+        ``motion`` is None, falls back to the standard single-stream forward pass.
+        """
+        if not self._motion_ready:
+            return super()._predict_once(x, profile, visualize, embed)
+
+        # Encode motion image (fall back to zeros if not supplied)
+        if motion is None:
+            motion = torch.zeros_like(x)
+        if motion.device != x.device:
+            motion = motion.to(x.device)
+        motion_feats = self.motion_encoder(motion)
+
+        y, dt, embeddings = [], [], []
+        embed_set = frozenset(embed) if embed is not None else {-1}
+        max_idx = max(embed_set)
+
+        cur = x
+        for m in self.model:
+            if m.f != -1:
+                cur = y[m.f] if isinstance(m.f, int) else [cur if j == -1 else y[j] for j in m.f]
+            if profile:
+                self._profile_one_layer(m, cur, dt)
+            cur = m(cur)
+
+            # Inject motion cross-attention after selected backbone layers
+            if m.i in self.inject_layers and self._motion_ready:
+                idx = self.inject_layers.index(m.i)
+                motion_feat = motion_feats[self.motion_feat_scales[idx]]
+                cur = self.cross_attns[idx](cur, motion_feat)
+
+            y.append(cur if m.i in self.save else None)
+            if visualize:
+                feature_visualization(cur, m.type, m.i, save_dir=visualize)
+            if m.i in embed_set:
+                embeddings.append(nn.functional.adaptive_avg_pool2d(cur, (1, 1)).squeeze(-1).squeeze(-1))
+                if m.i == max_idx:
+                    return torch.unbind(torch.cat(embeddings, 1), dim=0)
+
+        return cur
+
+    def loss(self, batch, preds=None):
+        """Compute detection loss, using the motion tensor from the batch when available."""
+        if getattr(self, "criterion", None) is None:
+            self.criterion = self.init_criterion()
+        if preds is None:
+            preds = self._predict_once(batch["img"], motion=batch.get("motion"))
+        return self.criterion(preds, batch)
+
+
 class OBBModel(DetectionModel):
     """YOLO Oriented Bounding Box (OBB) model.
 
