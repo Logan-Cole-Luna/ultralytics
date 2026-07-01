@@ -1178,6 +1178,19 @@ class RandomPerspective(BaseTransform):
                 img = img[..., None]
         labels["img"] = img
         labels["resized_shape"] = img.shape[:2]
+
+        # Apply the identical warp to a paired motion-difference image, if present (motion cross-attention
+        # datasets), so the two streams stay in spatial registration after augmentation.
+        motion = labels.get("motion")
+        if motion is not None:
+            if (size[0] != motion.shape[1] or size[1] != motion.shape[0]) or (M != np.eye(3)).any():
+                if self.perspective:
+                    motion = cv2.warpPerspective(motion, M, dsize=size, borderValue=(114, 114, 114))
+                else:
+                    motion = cv2.warpAffine(motion, M[:2], dsize=size, borderValue=(114, 114, 114))
+                if motion.ndim == 2:
+                    motion = motion[..., None]
+            labels["motion"] = motion
         return labels
 
     def apply_instances(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1555,6 +1568,16 @@ class RandomFlip(BaseTransform):
             elif params["direction"] == "horizontal":
                 img = np.fliplr(img)
         labels["img"] = np.ascontiguousarray(img)
+
+        # Keep a paired motion-difference image (motion cross-attention datasets) in registration.
+        motion = labels.get("motion")
+        if motion is not None:
+            if params["flip"]:
+                if params["direction"] == "vertical":
+                    motion = np.flipud(motion)
+                elif params["direction"] == "horizontal":
+                    motion = np.fliplr(motion)
+            labels["motion"] = np.ascontiguousarray(motion)
         return labels
 
     def apply_instances(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -1776,6 +1799,27 @@ class LetterBox(BaseTransform):
 
         labels["img"] = img
         labels["resized_shape"] = params["new_shape"]
+
+        # Apply the identical resize+pad to a paired motion-difference image, if present, so it lands in the
+        # same padded canvas position as the current frame instead of being stretched to fill it.
+        motion = labels.get("motion")
+        if motion is not None:
+            if motion.shape[:2][::-1] != new_unpad:
+                motion = cv2.resize(motion, new_unpad, interpolation=self.interpolation)
+                if motion.ndim == 2:
+                    motion = motion[..., None]
+            mh, mw, mc = motion.shape
+            if mc == 3:
+                motion = cv2.copyMakeBorder(
+                    motion, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(self.padding_value,) * 3
+                )
+            else:
+                pad_motion = np.full(
+                    (mh + top + bottom, mw + left + right, mc), fill_value=self.padding_value, dtype=motion.dtype
+                )
+                pad_motion[top : top + mh, left : left + mw] = motion
+                motion = pad_motion
+            labels["motion"] = motion
         return labels
 
     def apply_semantic(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:

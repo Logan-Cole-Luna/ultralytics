@@ -75,9 +75,100 @@ class MotionDetectionTrainer(DetectionTrainer):
         >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict[str, Any] | None = None, _callbacks: dict | None = None):
-        """Initialise the motion-aware trainer."""
+    def __init__(
+        self,
+        cfg=DEFAULT_CFG,
+        overrides: dict[str, Any] | None = None,
+        _callbacks: dict | None = None,
+        motion_warmup_epochs: int = 3,
+        motion_lr_mult: float = 5.0,
+    ):
+        """Initialise the motion-aware trainer.
+
+        Args:
+            motion_warmup_epochs (int): Number of initial epochs during which the pretrained backbone/head
+                are frozen and only ``motion_encoder`` + ``cross_attns`` train, so the gated cross-attention
+                can find a useful direction before the (typically small) dataset is fine-tuned jointly.
+                A well-converged pretrained backbone otherwise gives these newly-initialised layers little
+                gradient signal to work with. Set to 0 to disable.
+            motion_lr_mult (float): Learning-rate multiplier applied to ``motion_encoder`` + ``cross_attns``
+                parameters (including the attention ``gate``) relative to the rest of the network, and with
+                weight decay disabled for this group. Counteracts gradient starvation once warmup ends and
+                the backbone unfreezes.
+        """
         super().__init__(cfg, overrides, _callbacks)
+        self.motion_warmup_epochs = motion_warmup_epochs
+        self.motion_lr_mult = motion_lr_mult
+        if self.motion_warmup_epochs > 0:
+            self.add_callback("on_train_epoch_start", self._motion_warmup_step)
+
+    def _motion_warmup_step(self):
+        """Freeze everything but the motion pathway for the first `motion_warmup_epochs` epochs.
+
+        Backbone/head parameters live under ``self.model`` (named like ``model.0...``); ``motion_encoder``
+        and ``cross_attns`` are separate top-level submodules and never match that prefix, so a single
+        ``"model."`` substring cleanly isolates the motion pathway without touching the existing
+        `args.freeze` mechanism.
+        """
+        model = unwrap_model(self.model)
+        if self.epoch == 0:
+            self.freeze_layer_names = ["model."]
+            for k, v in model.named_parameters():
+                if v.dtype.is_floating_point:
+                    v.requires_grad = not k.startswith("model.")
+            LOGGER.info(
+                f"Motion warmup: training motion_encoder + cross_attns only for epochs "
+                f"0-{self.motion_warmup_epochs - 1}"
+            )
+        elif self.epoch == self.motion_warmup_epochs:
+            freeze_list = (
+                self.args.freeze
+                if isinstance(self.args.freeze, list)
+                else range(self.args.freeze)
+                if isinstance(self.args.freeze, int)
+                else []
+            )
+            self.freeze_layer_names = [f"model.{x}." for x in freeze_list] + [".dfl"]
+            for k, v in model.named_parameters():
+                if v.dtype.is_floating_point:
+                    v.requires_grad = not any(x in k for x in self.freeze_layer_names)
+            LOGGER.info("Motion warmup complete: unfreezing backbone/head for joint fine-tuning")
+
+    def build_optimizer(self, model, name="auto", lr=0.001, momentum=0.9, decay=1e-5, iterations=1e5):
+        """Build the optimizer, then isolate motion-pathway params into their own no-decay, higher-lr group.
+
+        Without this, the attention ``gate`` (and the rest of ``motion_encoder``/``cross_attns``) shares an
+        lr and weight-decay schedule tuned for a converged pretrained backbone, which can leave the gate
+        stuck near zero once the backbone unfreezes.
+        """
+        optimizer = super().build_optimizer(
+            model, name=name, lr=lr, momentum=momentum, decay=decay, iterations=iterations
+        )
+        if self.motion_lr_mult == 1.0:
+            return optimizer
+
+        motion_param_ids = {
+            id(p) for n, p in unwrap_model(model).named_parameters() if not n.startswith("model.")
+        }
+        if not motion_param_ids:
+            return optimizer
+
+        new_groups = []
+        for group in optimizer.param_groups:
+            keep, moved = [], []
+            for p in group["params"]:
+                (moved if id(p) in motion_param_ids else keep).append(p)
+            group["params"] = keep
+            if moved:
+                motion_group = {k: v for k, v in group.items() if k != "params"}
+                motion_group.update(params=moved, lr=group.get("lr", lr) * self.motion_lr_mult, weight_decay=0.0)
+                new_groups.append(motion_group)
+        optimizer.param_groups.extend(new_groups)
+        LOGGER.info(
+            f"optimizer: isolated motion pathway into {len(new_groups)} param group(s) at "
+            f"{self.motion_lr_mult}x lr, no weight decay"
+        )
+        return optimizer
 
     # ------------------------------------------------------------------
     # Dataset / loader

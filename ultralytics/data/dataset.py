@@ -423,7 +423,11 @@ class MotionYOLODataset(YOLODataset):
           labels/<split>/<name>.txt
 
     Mosaic, mixup, and cutmix augmentations are disabled because merging clips from independent
-    sequences would produce incoherent motion fields.
+    sequences would produce incoherent motion fields. Geometric augmentations that remain active
+    (``RandomPerspective``, ``RandomFlip``, and ``LetterBox``) apply the identical warp/flip/pad to
+    the paired ``motion`` array whenever it is present in ``labels``, so the two streams stay in
+    spatial registration; only appearance-only ops (``RandomHSV``, ``Albumentations``) skip it, which
+    is intentional.
 
     The ``motion`` tensor in each batch item is a uint8 CHW tensor (0–255) that is normalised to
     float [0, 1] inside the trainer's / validator's ``preprocess_batch``.
@@ -484,7 +488,8 @@ class MotionYOLODataset(YOLODataset):
         item = super().__getitem__(index)
         if "motion" in item and isinstance(item["motion"], np.ndarray):
             mot = item["motion"]
-            # Resize to match the final letterboxed/augmented image shape (C, H, W)
+            # The transform pipeline (RandomPerspective/RandomFlip/LetterBox) already keeps motion in
+            # registration with img; this resize is only a safety net for unexpected shape drift.
             h, w = item["img"].shape[1:]
             if mot.shape[:2] != (h, w):
                 mot = cv2.resize(mot, (w, h))
