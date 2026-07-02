@@ -80,6 +80,14 @@ class MotionCrossAttention(nn.Module):
         num_heads (int): Desired number of attention heads; automatically
             reduced until ``curr_dim % num_heads == 0`` and
             ``curr_dim // num_heads >= 8``.
+        sr_ratio (int): Spatial-reduction ratio applied to the motion (K/V) map before attention,
+            following PVT's SRA. Full dense cross-attention is O((H*W)^2) in tokens, and at high
+            resolutions (e.g. P3) that quadratic term dominates wall-clock cost far more than its
+            FLOP count suggests, since the reshape/softmax/matmul chain is memory-bandwidth bound.
+            Queries (current-frame) stay at full resolution so the output keeps full spatial
+            fidelity; only the K/V side is average-pooled by ``sr_ratio``, cutting the attention
+            matrix from ``(H*W) x (H*W)`` to ``(H*W) x (H*W/sr_ratio^2)``. ``sr_ratio=1`` (default)
+            reproduces the original full dense attention exactly.
 
     Examples:
         >>> attn = MotionCrossAttention(curr_dim=256, motion_dim=128, num_heads=4)
@@ -89,7 +97,7 @@ class MotionCrossAttention(nn.Module):
         torch.Size([2, 256, 80, 80])
     """
 
-    def __init__(self, curr_dim: int, motion_dim: int, num_heads: int = 4):
+    def __init__(self, curr_dim: int, motion_dim: int, num_heads: int = 4, sr_ratio: int = 1):
         super().__init__()
         # Clamp num_heads so that head_dim >= 8 and curr_dim is divisible
         while num_heads > 1 and (curr_dim % num_heads != 0 or curr_dim // num_heads < 8):
@@ -97,6 +105,7 @@ class MotionCrossAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = curr_dim // num_heads
         self.scale = self.head_dim**-0.5
+        self.sr_ratio = sr_ratio
 
         self.q_proj = Conv(curr_dim, curr_dim, 1, act=False)
         self.k_proj = Conv(motion_dim, curr_dim, 1, act=False)
@@ -121,14 +130,21 @@ class MotionCrossAttention(nn.Module):
         if x_motion.shape[2:] != (H, W):
             x_motion = F.interpolate(x_motion, size=(H, W), mode="bilinear", align_corners=False)
 
+        x_motion_kv = (
+            F.avg_pool2d(x_motion, kernel_size=self.sr_ratio, stride=self.sr_ratio, ceil_mode=True)
+            if self.sr_ratio > 1
+            else x_motion
+        )
+        Hk, Wk = x_motion_kv.shape[2:]
         N = H * W
+        Nk = Hk * Wk
 
-        # Project and reshape to (B, heads, N, head_dim)
+        # Project and reshape: queries at full resolution, keys/values at (possibly) reduced resolution
         q = self.q_proj(x_curr).reshape(B, self.num_heads, self.head_dim, N).transpose(-2, -1)
-        k = self.k_proj(x_motion).reshape(B, self.num_heads, self.head_dim, N).transpose(-2, -1)
-        v = self.v_proj(x_motion).reshape(B, self.num_heads, self.head_dim, N).transpose(-2, -1)
+        k = self.k_proj(x_motion_kv).reshape(B, self.num_heads, self.head_dim, Nk).transpose(-2, -1)
+        v = self.v_proj(x_motion_kv).reshape(B, self.num_heads, self.head_dim, Nk).transpose(-2, -1)
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale  # (B, heads, N, N)
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # (B, heads, N, Nk)
         attn = attn.softmax(dim=-1)
 
         out = (attn @ v).transpose(-2, -1).reshape(B, C, H, W)

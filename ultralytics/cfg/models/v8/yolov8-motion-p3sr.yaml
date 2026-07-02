@@ -1,0 +1,78 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+# YOLOv8 with motion cross-attention, using spatial-reduction attention (SRA) at the P3 tap.
+#
+# Same 3 injection points as yolov8-motion.yaml (P3, P4, P5), but the P3 cross-attention pools its
+# K/V (motion) side by 4x before computing attention. Full dense attention is O((H*W)^2) in tokens,
+# and P3 is by far the highest-resolution tap (52x52=2704 tokens at imgsz 416, vs 676 at P4 and 169
+# at P5) - benchmarking showed P3's quadratic attention cost dominates wall-clock latency far more
+# than its FLOP count suggests (memory-bandwidth bound reshape/softmax/matmul chain), while dropping
+# P5 entirely (see yolov8-motion-2attn.yaml) barely changed latency at all. Queries stay at full P3
+# resolution so the output feature map keeps full spatial fidelity; only the motion keys/values are
+# coarsened, which is reasonable since motion is typically smoother/lower-frequency than appearance.
+#
+# See yolov8-motion.yaml for the full architecture overview.
+#
+# Usage
+# -----
+#   from ultralytics.models.yolo.motion.train import MotionDetectionTrainer
+#   trainer = MotionDetectionTrainer(overrides=dict(model="yolov8s-motion-p3sr.yaml", data="coco8.yaml", epochs=100))
+#   trainer.train()
+
+nc: 80  # number of classes
+scales:
+  # [depth_multiple, width_multiple, max_channels]
+  n: [0.33, 0.25, 1024]  # nano
+  s: [0.33, 0.50, 1024]  # small
+  m: [0.67, 0.75, 768]   # medium
+  l: [1.00, 1.00, 512]   # large
+  x: [1.00, 1.25, 512]   # xlarge
+
+# ──────────────────────────────────────────────────────────────────────
+# Motion stream configuration  (MotionDetectionModel reads this section)
+# ──────────────────────────────────────────────────────────────────────
+motion:
+  channels: 3                    # motion diff input channels (3 for RGB absolute diff)
+  dims: [32, 64, 128, 256, 256]  # MotionEncoder output channels at each stride (x2, x4, x8, x16, x32)
+  inject_layers: [4, 6, 9]  # backbone layer indices to fuse motion after (P3, P4, P5+SPPF)
+  motion_feat_scales: [2, 3, 4]
+  sr_ratios: [4, 1, 1]
+  # ^ K/V spatial-reduction ratio per inject point: P3's motion K/V is 4x4-avg-pooled before
+  #   attention (2704 -> 169 K/V tokens at imgsz 416), P4/P5 stay full dense (already cheap).
+
+# ──────────────────────────────────────────────────────────────────────
+# YOLOv8 backbone  (current frame only – identical to yolov8.yaml)
+# ──────────────────────────────────────────────────────────────────────
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]    # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]   # 1-P2/4
+  - [-1, 3, C2f, [128, True]]    # 2
+  - [-1, 1, Conv, [256, 3, 2]]   # 3-P3/8
+  - [-1, 6, C2f, [256, True]]    # 4  ← MotionCrossAttention injected here (P3, sr_ratio=4)
+  - [-1, 1, Conv, [512, 3, 2]]   # 5-P4/16
+  - [-1, 6, C2f, [512, True]]    # 6  ← MotionCrossAttention injected here (P4)
+  - [-1, 1, Conv, [1024, 3, 2]]  # 7-P5/32
+  - [-1, 3, C2f, [1024, True]]   # 8
+  - [-1, 1, SPPF, [1024, 5]]     # 9  ← MotionCrossAttention injected here (P5+SPPF)
+
+# ──────────────────────────────────────────────────────────────────────
+# YOLOv8 head  (identical to yolov8.yaml)
+# ──────────────────────────────────────────────────────────────────────
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 6], 1, Concat, [1]]   # cat backbone P4
+  - [-1, 3, C2f, [512]]         # 12
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]
+  - [[-1, 4], 1, Concat, [1]]   # cat backbone P3
+  - [-1, 3, C2f, [256]]         # 15 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]
+  - [[-1, 12], 1, Concat, [1]]  # cat head P4
+  - [-1, 3, C2f, [512]]         # 18 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]
+  - [[-1, 9], 1, Concat, [1]]   # cat head P5
+  - [-1, 3, C2f, [1024]]        # 21 (P5/32-large)
+
+  - [[15, 18, 21], 1, Detect, [nc]]

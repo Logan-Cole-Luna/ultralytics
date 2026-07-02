@@ -102,8 +102,12 @@ class MotionDetectionTrainer(DetectionTrainer):
         if self.motion_warmup_epochs > 0:
             self.add_callback("on_train_epoch_start", self._motion_warmup_step)
 
-    def _motion_warmup_step(self):
+    def _motion_warmup_step(self, *_trainer):
         """Freeze everything but the motion pathway for the first `motion_warmup_epochs` epochs.
+
+        Registered as an ``on_train_epoch_start`` callback, which ultralytics invokes as
+        ``callback(trainer)``; accepts and ignores that positional arg since this is a bound method
+        that already has ``self``.
 
         Backbone/head parameters live under ``self.model`` (named like ``model.0...``); ``motion_encoder``
         and ``cross_attns`` are separate top-level submodules and never match that prefix, so a single

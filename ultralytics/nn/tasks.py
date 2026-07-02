@@ -540,6 +540,9 @@ class MotionDetectionModel(DetectionModel):
           dims: [32, 64, 128, 256]  # encoder output channels per stage
           inject_layers: [4, 6, 9]  # backbone layer indices (P3, P4, P5+SPPF)
           motion_feat_scales: [2, 3, 3]  # which encoder stage feeds each inject point
+          sr_ratios: [1, 1, 1]  # optional; K/V spatial-reduction ratio per inject point (default all 1,
+                                 # i.e. full dense attention). Use >1 at high-resolution taps like P3 to
+                                 # cut the O((H*W)^2) attention cost - see MotionCrossAttention.sr_ratio.
 
     Examples:
         >>> model = MotionDetectionModel("yolov8-motion.yaml", ch=3, nc=80)
@@ -568,6 +571,7 @@ class MotionDetectionModel(DetectionModel):
         encoder_dims: list = motion_cfg.get("dims", [32, 64, 128, 256])
         self.inject_layers: list = motion_cfg.get("inject_layers", [4, 6, 9])
         self.motion_feat_scales: list = motion_cfg.get("motion_feat_scales", [2, 3, 3])
+        sr_ratios: list = motion_cfg.get("sr_ratios", [1] * len(self.inject_layers))
 
         # Build motion encoder
         self.motion_encoder = MotionEncoder(in_channels=motion_ch, dims=encoder_dims)
@@ -579,7 +583,8 @@ class MotionDetectionModel(DetectionModel):
         motion_channels = [dummy_enc[s].shape[1] for s in self.motion_feat_scales]
 
         self.cross_attns = nn.ModuleList(
-            MotionCrossAttention(cc, mc, num_heads=4) for cc, mc in zip(curr_channels, motion_channels)
+            MotionCrossAttention(cc, mc, num_heads=4, sr_ratio=sr)
+            for cc, mc, sr in zip(curr_channels, motion_channels, sr_ratios)
         )
         self._motion_ready = True
 
