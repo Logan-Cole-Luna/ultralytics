@@ -4,9 +4,28 @@
 Uses real ground-truth boxes from groundtruth.csv (gt_left/top/right/bottom), not dummy labels.
 Background frames (no box) get an empty label file - a valid YOLO negative, not skipped.
 Split is by whole flight (never interleaved frames) so val is a genuinely unseen sequence.
+
+Current-frame images are hard-linked directly to the original AOT PNGs (no resize/recompress
+copy) to avoid duplicating image storage - the training pipeline's own LetterBox/RandomPerspective
+already resizes to the training imgsz at load time regardless of source resolution. Hard links
+(not symlinks) are used because Windows requires elevated privileges for symlinks but not hard
+links, and both live on the same volume here.
+
+Motion maps are `stab3` — the winner of the extractor comparison on this data (see
+compare_motion_extractors.py and runs/motion_compare/): each stride-1 neighbour frame is
+homography-aligned onto the current frame (grid keypoints + pyramidal LK + RANSAC) and the map is
+min(|I_t - warp(I_{t-1})|, |I_t - warp(I_{t+1})|) followed by a small Gaussian on the |diff|.
+Alignment cancels camera ego-motion (clouds/horizon/terrain), the three-frame min suppresses
+registration residue, and the post-blur integrates target energy against sensor noise. The map is
+computed at native resolution (differencing after downsampling destroys few-pixel targets), then
+stored at MOTION_SCALE with a fixed GAIN so the few-gray-level signal survives uint8 quantization
+and the loader's resize. Raw absdiff at 640x480 (the previous scheme) never ranked the target
+above background clutter on the benchmark windows.
 """
 
+import argparse
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -14,19 +33,48 @@ import cv2
 import numpy as np
 import yaml
 
+from compare_motion_extractors import estimate_homography, post_blur
+
 PARTS = ["part1", "part3"]
 MAX_PART3_FLIGHTS = 10  # cap part3 (has ~37 flights) to keep prep/train time reasonable
-FRAME_STRIDE = 2  # take every 2nd frame per flight (halves volume, motion diff still meaningful)
-IMG_SIZE_TARGET = (1280, 960)  # (w, h) cap; uniform scale keeps normalized bbox fractions valid.
-# AOT objects are extremely small in pixel terms (median ~2.7px at the old 640x480 cap trained at
-# imgsz=416); this preserves ~4x more real detail from the 2448x2048 source so objects have enough
-# pixels to be representable at the model's stride-8 grid. Train at a matching higher imgsz.
+FRAME_STRIDE = 2  # emit every 2nd frame per flight (halves volume; stab3 still uses stride-1 neighbours)
+MOTION_SCALE = 0.5  # store motion at half native res: computed at native, downsized after
+MOTION_GAIN = 6.0  # fixed gain on the stab3 map before uint8: typical target signal is 8-17 gray
+# levels (see runs/motion_compare metrics.json), which would be nearly crushed by uint8 rounding +
+# the loader's bilinear resize; a fixed (not per-image) gain keeps frames comparable so an empty
+# frame stays dim instead of having its noise stretched to full range.
 VAL_FRACTION_DENOM = 5  # ~1 in 5 flights (sorted, deterministic) held out for val
 
-dataset_dir = Path("motion_aot_dataset")
+
+def warp_onto(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
+    """Homography-align grayscale frame *src* onto *dst* (identity fallback on failure)."""
+    H, _ = estimate_homography(src, dst)
+    if H is None:  # featureless scene (e.g. pure sky): raw diff is fine there anyway
+        return src
+    h, w = dst.shape
+    return cv2.warpPerspective(src, H, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+
+
+def stab3_map(curr: np.ndarray, neighbours: list) -> np.ndarray:
+    """Stabilized three-frame difference of *curr* against its available stride-1 neighbours.
+
+    With both neighbours this is min(back-diff, forward-diff); at sequence edges (or unreadable
+    neighbour frames) it degrades to the single-sided stabilized diff, and to zeros with none.
+    """
+    diffs = [cv2.absdiff(curr, warp_onto(nb, curr)) for nb in neighbours if nb is not None]
+    if not diffs:
+        return np.zeros(curr.shape, dtype=np.float32)
+    return post_blur(np.minimum(*diffs) if len(diffs) == 2 else diffs[0])
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", default="motion_aot_dataset", help="dataset output directory")
+    parser.add_argument("--max-frames-per-flight", type=int, default=None,
+                        help="cap emitted frames per flight (smoke tests only)")
+    args = parser.parse_args()
+    dataset_dir = Path(args.out)
+
     print("[1/4] Scanning AOT parts and loading ground truth...")
     flight_to_dir = {}
     flight_to_rows = {}
@@ -70,13 +118,15 @@ def main():
     print(f"  {len(all_flights)} flights ({len(train_flights)} train / {len(val_flights)} val)")
     print(f"  {n_total} frames total, {n_box_total} with real boxes, stride={FRAME_STRIDE}")
 
-    print("\n[2/4] Extracting frames, motion differences, and labels...")
+    print("\n[2/4] Linking frames, generating stab3 motion maps, and writing labels...")
     for split in ["train", "val"]:
         for subdir in ["images", "motion", "labels"]:
             d = dataset_dir / subdir / split
             d.mkdir(parents=True, exist_ok=True)
             for f in d.iterdir():  # clear stale contents from any previous prep
                 f.unlink()
+    for stale_cache in (dataset_dir / "labels").glob("*.cache"):  # force ultralytics label re-scan
+        stale_cache.unlink()
 
     frame_count = 0
     split_counts = {"train": 0, "val": 0}
@@ -87,29 +137,52 @@ def main():
         img_dir = flight_to_dir[fid]
         rows = flight_to_rows[fid]
 
-        ordered_names = sorted(rows.keys(), key=lambda n: int(rows[n]["frame"]))[::FRAME_STRIDE]
+        # Full stride-1 sequence: stab3 always differences against true 0.1 s neighbours, even
+        # though only every FRAME_STRIDE-th frame is emitted as a training sample.
+        ordered_all = sorted(rows.keys(), key=lambda n: int(rows[n]["frame"]))
+        emit_indices = list(range(0, len(ordered_all), FRAME_STRIDE))
+        if args.max_frames_per_flight:
+            emit_indices = emit_indices[: args.max_frames_per_flight]
 
-        prev_frame = None
-        for img_name in ordered_names:
+        gray_cache: dict[int, np.ndarray | None] = {}  # sliding window of decoded gray frames
+
+        def gray(idx: int) -> np.ndarray | None:
+            """Grayscale frame at *idx* of ordered_all, cached; None if out of range/unreadable."""
+            if not 0 <= idx < len(ordered_all):
+                return None
+            if idx not in gray_cache:
+                gray_cache[idx] = cv2.imread(str(img_dir / ordered_all[idx]), cv2.IMREAD_GRAYSCALE)
+            return gray_cache[idx]
+
+        emitted = 0
+        for j in emit_indices:
+            img_name = ordered_all[j]
             row = rows[img_name]
-            frame = cv2.imread(str(img_dir / img_name))
-            if frame is None:
+            curr = gray(j)
+            if curr is None:
                 continue
 
-            orig_h, orig_w = frame.shape[:2]
             size_w = int(float(row["size_width"]))
             size_h = int(float(row["size_height"]))
 
-            scale = min(IMG_SIZE_TARGET[0] / orig_w, IMG_SIZE_TARGET[1] / orig_h)
-            frame_resized = cv2.resize(frame, (int(orig_w * scale), int(orig_h * scale)))
+            # Hard-link the original PNG directly - no resize/recompress copy.
+            frame_name = f"frame_{frame_count:06d}.png"
+            dest_path = dataset_dir / "images" / split / frame_name
+            dest_path.unlink(missing_ok=True)
+            os.link(img_dir / img_name, dest_path)
 
-            frame_name = f"frame_{frame_count:06d}.jpg"
-            cv2.imwrite(str(dataset_dir / "images" / split / frame_name), frame_resized)
+            # stab3 at native resolution, then downsize the *result* and apply fixed gain.
+            motion = stab3_map(curr, [gray(j - 1), gray(j + 1)])
+            motion = cv2.resize(motion, None, fx=MOTION_SCALE, fy=MOTION_SCALE, interpolation=cv2.INTER_AREA)
+            motion = np.clip(motion * MOTION_GAIN, 0, 255).astype(np.uint8)
+            # Must match the image file's extension (.png) - MotionYOLODataset._motion_path only
+            # swaps the "images"/"motion" directory component, not the extension.
+            cv2.imwrite(str(dataset_dir / "motion" / split / f"frame_{frame_count:06d}.png"), motion)
 
-            motion = np.zeros_like(frame_resized) if prev_frame is None else cv2.absdiff(frame_resized, prev_frame)
-            cv2.imwrite(str(dataset_dir / "motion" / split / frame_name), motion)
+            for stale in [k for k in gray_cache if k < j + 1]:  # keep j+1 (next sample's back-neighbour)
+                del gray_cache[stale]
 
-            label_path = dataset_dir / "labels" / split / frame_name.replace(".jpg", ".txt")
+            label_path = dataset_dir / "labels" / split / f"frame_{frame_count:06d}.txt"
             if row["gt_left"].strip():
                 left, top = float(row["gt_left"]), float(row["gt_top"])
                 right, bottom = float(row["gt_right"]), float(row["gt_bottom"])
@@ -123,11 +196,11 @@ def main():
             else:
                 label_path.touch()
 
-            prev_frame = frame_resized
             frame_count += 1
+            emitted += 1
             split_counts[split] += 1
 
-        print(f"  {fid[:8]}...  ({split}): {len(ordered_names)} frames")
+        print(f"  {fid[:8]}...  ({split}): {emitted} frames")
 
     print(f"\n  Created {frame_count} frames")
     print(f"  Train: {split_counts['train']} frames ({box_counts['train']} with boxes)")
