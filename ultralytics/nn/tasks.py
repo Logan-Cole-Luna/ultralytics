@@ -526,7 +526,7 @@ class MotionDetectionModel(DetectionModel):
     Accepts a 'motion' tensor (absolute frame difference) alongside the current frame and fuses
     motion cues into backbone features (P3, P4, P5) via cross-attention before the detection head.
     A lightweight MotionEncoder processes the motion image; MotionCrossAttention modules integrate
-    the resulting features into the main stream using a learned gate that starts at zero.
+    the resulting features into the main stream through a learned tanh gate (near-identity at init).
 
     Attributes:
         inject_layers (list[int]): Backbone layer indices after which cross-attention is applied.
@@ -543,6 +543,8 @@ class MotionDetectionModel(DetectionModel):
           sr_ratios: [1, 1, 1]  # optional; K/V spatial-reduction ratio per inject point (default all 1,
                                  # i.e. full dense attention). Use >1 at high-resolution taps like P3 to
                                  # cut the O((H*W)^2) attention cost - see MotionCrossAttention.sr_ratio.
+          gate_init: 0.1        # optional; initial raw gate value per cross-attention block
+                                 # (contribution = tanh(gate_init)) - see MotionCrossAttention docstring.
 
     Examples:
         >>> model = MotionDetectionModel("yolov8-motion.yaml", ch=3, nc=80)
@@ -572,6 +574,7 @@ class MotionDetectionModel(DetectionModel):
         self.inject_layers: list = motion_cfg.get("inject_layers", [4, 6, 9])
         self.motion_feat_scales: list = motion_cfg.get("motion_feat_scales", [2, 3, 3])
         sr_ratios: list = motion_cfg.get("sr_ratios", [1] * len(self.inject_layers))
+        gate_init: float = motion_cfg.get("gate_init", 0.1)
 
         # Build motion encoder
         self.motion_encoder = MotionEncoder(in_channels=motion_ch, dims=encoder_dims)
@@ -583,7 +586,7 @@ class MotionDetectionModel(DetectionModel):
         motion_channels = [dummy_enc[s].shape[1] for s in self.motion_feat_scales]
 
         self.cross_attns = nn.ModuleList(
-            MotionCrossAttention(cc, mc, num_heads=4, sr_ratio=sr)
+            MotionCrossAttention(cc, mc, num_heads=4, sr_ratio=sr, gate_init=gate_init)
             for cc, mc, sr in zip(curr_channels, motion_channels, sr_ratios)
         )
         self._motion_ready = True

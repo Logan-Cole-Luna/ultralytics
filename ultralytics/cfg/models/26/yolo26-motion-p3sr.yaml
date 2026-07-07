@@ -40,6 +40,10 @@ motion:
   sr_ratios: [4, 1, 1]
   # ^ K/V spatial-reduction ratio per inject point: P3's motion K/V is 4x4-avg-pooled before
   #   attention (2704 -> 169 K/V tokens at imgsz 416), P4/P5 stay full dense (already cheap).
+  gate_init: 0.1
+  # ^ Initial per-block residual contribution is tanh(gate_init). Not 0: gradients into the whole
+  #   motion pathway are scaled by tanh(gate), so a zero gate starves it at init (observed: gates
+  #   stuck at |tanh| < 0.15 after 100 epochs). 0.1 stays near-identity but trains from step 1.
 
 # ──────────────────────────────────────────────────────────────────────
 # YOLO26 backbone  (current frame only – identical to yolo26.yaml)

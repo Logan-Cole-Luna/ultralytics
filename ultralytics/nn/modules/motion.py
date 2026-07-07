@@ -17,8 +17,9 @@ Architecture overview
                        stride (x2, x4, x8, x16) from the motion image.
   MotionCrossAttention – residual cross-attention block: current-frame features
                          are the queries, motion features supply keys and values.
-                         A learned gate starts at zero so the block contributes
-                         nothing at init and activates gradually during training.
+                         A learned tanh gate (default init 0.1) keeps the block
+                         near-identity at init while letting the motion pathway
+                         receive gradient from the first step.
 """
 
 from __future__ import annotations
@@ -69,10 +70,18 @@ class MotionEncoder(nn.Module):
 class MotionCrossAttention(nn.Module):
     """Cross-attention that lets current-frame features (Q) attend to motion features (K, V).
 
-    The module is inserted after selected backbone layers.  A learnable ``gate``
-    parameter initialised to ``0`` ensures the residual contribution starts at
-    zero (``tanh(0) = 0``) and grows only as gradient updates push it away from
-    zero, giving stable early training behaviour.
+    The module is inserted after selected backbone layers.  A learnable scalar
+    ``gate`` scales the residual contribution as ``tanh(gate)``.
+
+    Gate initialisation: every gradient reaching the q/k/v/out projections (and the
+    upstream MotionEncoder) is scaled by ``tanh(gate)``, so a ``gate_init`` of exactly
+    ``0`` starves the whole motion pathway of gradient at init — only the gate itself
+    receives signal, and the pathway can start learning only after the gate has drifted
+    off zero (a slow, noisy cold start; observed empirically as gates stuck at
+    ``|tanh| < 0.15`` after 100 epochs). The default ``gate_init=0.1`` keeps the block
+    near-identity (~10% contribution) while letting the motion pathway train from the
+    first step. Set ``gate_init=0`` to recover the exact zero-at-init behaviour when a
+    pretrained checkpoint must be bit-identical at step 0.
 
     Args:
         curr_dim (int): Channel count of the current-frame feature map.
@@ -80,6 +89,8 @@ class MotionCrossAttention(nn.Module):
         num_heads (int): Desired number of attention heads; automatically
             reduced until ``curr_dim % num_heads == 0`` and
             ``curr_dim // num_heads >= 8``.
+        gate_init (float): Initial value of the raw gate scalar (contribution is
+            ``tanh(gate_init)``). See note above.
         sr_ratio (int): Spatial-reduction ratio applied to the motion (K/V) map before attention,
             following PVT's SRA. Full dense cross-attention is O((H*W)^2) in tokens, and at high
             resolutions (e.g. P3) that quadratic term dominates wall-clock cost far more than its
@@ -97,7 +108,9 @@ class MotionCrossAttention(nn.Module):
         torch.Size([2, 256, 80, 80])
     """
 
-    def __init__(self, curr_dim: int, motion_dim: int, num_heads: int = 4, sr_ratio: int = 1):
+    def __init__(
+        self, curr_dim: int, motion_dim: int, num_heads: int = 4, sr_ratio: int = 1, gate_init: float = 0.1
+    ):
         super().__init__()
         # Clamp num_heads so that head_dim >= 8 and curr_dim is divisible
         while num_heads > 1 and (curr_dim % num_heads != 0 or curr_dim // num_heads < 8):
@@ -112,8 +125,8 @@ class MotionCrossAttention(nn.Module):
         self.v_proj = Conv(motion_dim, curr_dim, 1, act=False)
         self.out_proj = Conv(curr_dim, curr_dim, 1, act=False)
 
-        # Gate starts at 0 → tanh(0) = 0 → no contribution at init
-        self.gate = nn.Parameter(torch.zeros(1))
+        # Residual contribution starts at tanh(gate_init); see class docstring for why not 0.
+        self.gate = nn.Parameter(torch.full((1,), float(gate_init)))
 
     def forward(self, x_curr: torch.Tensor, x_motion: torch.Tensor) -> torch.Tensor:
         """Fuse motion cues into current-frame features via residual cross-attention.

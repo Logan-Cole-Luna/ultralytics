@@ -101,6 +101,25 @@ class MotionDetectionTrainer(DetectionTrainer):
         self.motion_lr_mult = motion_lr_mult
         if self.motion_warmup_epochs > 0:
             self.add_callback("on_train_epoch_start", self._motion_warmup_step)
+        self.add_callback("on_fit_epoch_end", self._log_gates)
+
+    def _log_gates(self, *_trainer):
+        """Log each cross-attention gate's tanh contribution and append it to save_dir/gates.csv.
+
+        The gate trajectory is the primary diagnostic for whether the motion stream is being
+        used: gates stuck near their init mean the model found no exploitable motion signal
+        (or the pathway is gradient-starved - see MotionCrossAttention.gate_init).
+        """
+        model = unwrap_model(self.model)
+        if not hasattr(model, "cross_attns"):
+            return
+        vals = [float(attn.gate.tanh()) for attn in model.cross_attns]
+        LOGGER.info("motion gates tanh(gate): " + "  ".join(f"[{i}] {v:+.4f}" for i, v in enumerate(vals)))
+        csv_path = self.save_dir / "gates.csv"
+        if not csv_path.exists():
+            csv_path.write_text("epoch," + ",".join(f"gate{i}" for i in range(len(vals))) + "\n")
+        with open(csv_path, "a") as f:
+            f.write(f"{self.epoch}," + ",".join(f"{v:.6f}" for v in vals) + "\n")
 
     def _motion_warmup_step(self, *_trainer):
         """Freeze everything but the motion pathway for the first `motion_warmup_epochs` epochs.
