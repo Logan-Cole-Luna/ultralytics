@@ -13,6 +13,8 @@ part1/ImageSets/groundtruth.json
 part1/ImageSets/valid_encounters_maxRange700_maxGap3_minEncLen30.csv
 part1/ImageSets/valid_encounters_maxRange700_maxGap3_minEncLen30.json
 
+motion_aot_dataset/labels/
+
 # Distribution / packaging
 .Python
 build/

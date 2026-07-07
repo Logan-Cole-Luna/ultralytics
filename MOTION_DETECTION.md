@@ -343,8 +343,8 @@ motion:
 **Why cross-attention and not concatenation?**  
 Concatenation would require modifying the first conv and break all pretrained weight compatibility. Cross-attention lets the current-frame stream remain identical to standard YOLOv8, so any pretrained `.pt` can be used as a starting point.
 
-**Why gate = 0 at init?**  
-`tanh(0) = 0` means the motion stream contributes nothing at initialisation, making the model equivalent to standard YOLOv8 at step 0. The gate grows during training as gradient updates push it away from zero. This avoids training instability when starting from a pretrained checkpoint.
+**Why gate_init = 0.1 (not 0) at init?**  
+The residual is `x + tanh(gate)·CrossAttn(...)`, so every gradient reaching the attention projections and the MotionEncoder is scaled by `tanh(gate)`. With `gate = 0` the entire motion pathway receives zero gradient at init — only the gate itself gets signal, and the pathway can start learning only after the gate drifts off zero. Empirically (100-epoch run on AOT) this cold start left gates stuck at `|tanh| < 0.15`. The default `gate_init: 0.1` (~10% contribution) keeps the block near-identity — pretrained checkpoints still transfer without instability — while the motion pathway trains from the first step. Set `gate_init: 0` in the YAML `motion:` section if bit-identical step-0 behaviour to the base model is required. Gate trajectories are logged per epoch to `gates.csv` in the run directory.
 
 **Why is mosaic disabled in `MotionYOLODataset`?**  
 Mosaic combines four independent clips into one image. The motion-diff for the composite would be semantically incoherent (motion from four different scenes). Disabling mosaic preserves temporal consistency between `img` and `motion`.
