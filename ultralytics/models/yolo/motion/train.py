@@ -25,7 +25,9 @@ from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
 from ultralytics.utils.torch_utils import torch_distributed_zero_first, unwrap_model
 
 
-def build_motion_dataset(cfg, img_path, batch, data, mode="train", rect=False, stride=32):
+def build_motion_dataset(
+    cfg, img_path, batch, data, mode="train", rect=False, stride=32, motion_mosaic=False, motion_aug=False
+):
     """Build a MotionYOLODataset for training or validation.
 
     Args:
@@ -36,6 +38,8 @@ def build_motion_dataset(cfg, img_path, batch, data, mode="train", rect=False, s
         mode (str): ``'train'`` or ``'val'``.
         rect (bool): Enable rectangular batching.
         stride (int): Model stride for padding alignment.
+        motion_mosaic (bool): Enable motion-aware mosaic (MotionMosaic) at the standard hyp.mosaic prob.
+        motion_aug (bool): Enable motion-only augmentation (amplitude jitter / dropout / noise).
 
     Returns:
         (MotionYOLODataset): Dataset object ready for use in a DataLoader.
@@ -43,6 +47,8 @@ def build_motion_dataset(cfg, img_path, batch, data, mode="train", rect=False, s
     pad = 0.0 if mode == "train" else 0.5
     fraction = cfg.fraction if mode == "train" else 1.0
     return MotionYOLODataset(
+        motion_mosaic=motion_mosaic,
+        motion_aug=motion_aug,
         img_path=img_path,
         imgsz=cfg.imgsz,
         batch_size=batch,
@@ -82,6 +88,8 @@ class MotionDetectionTrainer(DetectionTrainer):
         _callbacks: dict | None = None,
         motion_warmup_epochs: int = 3,
         motion_lr_mult: float = 5.0,
+        motion_mosaic: bool = False,
+        motion_aug: bool | dict = False,
     ):
         """Initialise the motion-aware trainer.
 
@@ -95,10 +103,17 @@ class MotionDetectionTrainer(DetectionTrainer):
                 parameters (including the attention ``gate``) relative to the rest of the network, and with
                 weight decay disabled for this group. Counteracts gradient starvation once warmup ends and
                 the backbone unfreezes.
+            motion_mosaic (bool): Train with motion-aware mosaic (MotionMosaic) instead of disabling
+                mosaic entirely, restoring augmentation parity with the plain DetectionTrainer.
+            motion_aug (bool | dict): Enable motion-only augmentation (amplitude jitter / dropout /
+                noise). ``True`` uses MotionYOLODataset.MOTION_AUG_DEFAULTS; a dict overrides any of
+                ``dropout`` / ``gain`` / ``noise``.
         """
         super().__init__(cfg, overrides, _callbacks)
         self.motion_warmup_epochs = motion_warmup_epochs
         self.motion_lr_mult = motion_lr_mult
+        self.motion_mosaic = motion_mosaic
+        self.motion_aug = motion_aug
         if self.motion_warmup_epochs > 0:
             self.add_callback("on_train_epoch_start", self._motion_warmup_step)
         self.add_callback("on_fit_epoch_end", self._log_gates)
@@ -113,7 +128,12 @@ class MotionDetectionTrainer(DetectionTrainer):
         model = unwrap_model(self.model)
         if not hasattr(model, "cross_attns"):
             return
-        vals = [float(attn.gate.tanh()) for attn in model.cross_attns]
+        # Mean tanh over every gate parameter in the module: covers scalar gates, per-channel
+        # vector gates (pixel_cg), and multi-gate fusions (pixel_sa has a pixel + an SA gate).
+        vals = []
+        for attn in model.cross_attns:
+            gates = [p for n, p in attn.named_parameters() if n.split(".")[-1] == "gate"]
+            vals.append(float(torch.stack([g.tanh().mean() for g in gates]).mean().detach()))
         LOGGER.info("motion gates tanh(gate): " + "  ".join(f"[{i}] {v:+.4f}" for i, v in enumerate(vals)))
         csv_path = self.save_dir / "gates.csv"
         if not csv_path.exists():
@@ -209,7 +229,17 @@ class MotionDetectionTrainer(DetectionTrainer):
             (MotionYOLODataset): Configured dataset.
         """
         gs = max(int(unwrap_model(self.model).stride.max()), 32)
-        return build_motion_dataset(self.args, img_path, batch, self.data, mode=mode, rect=mode == "val", stride=gs)
+        return build_motion_dataset(
+            self.args,
+            img_path,
+            batch,
+            self.data,
+            mode=mode,
+            rect=mode == "val",
+            stride=gs,
+            motion_mosaic=self.motion_mosaic and mode == "train",
+            motion_aug=self.motion_aug and mode == "train",
+        )
 
     def get_dataloader(self, dataset_path: str, batch_size: int = 16, rank: int = 0, mode: str = "train"):
         """Construct and return a DataLoader backed by MotionYOLODataset.

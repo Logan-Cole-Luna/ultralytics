@@ -422,12 +422,23 @@ class MotionYOLODataset(YOLODataset):
           motion/<split>/<name>.jpg   ← absolute frame difference (same filename)
           labels/<split>/<name>.txt
 
-    Mosaic, mixup, and cutmix augmentations are disabled because merging clips from independent
-    sequences would produce incoherent motion fields. Geometric augmentations that remain active
-    (``RandomPerspective``, ``RandomFlip``, and ``LetterBox``) apply the identical warp/flip/pad to
-    the paired ``motion`` array whenever it is present in ``labels``, so the two streams stay in
-    spatial registration; only appearance-only ops (``RandomHSV``, ``Albumentations``) skip it, which
-    is intentional.
+    Mixup and cutmix are always disabled (alpha-blending two frames' motion maps is genuinely
+    incoherent). Mosaic is opt-in via ``motion_mosaic=True``: it uses ``MotionMosaic``, which pastes
+    each patch's motion map with the same layout as its image, so the composite stays coherent
+    per-quadrant (see MotionMosaic). Geometric augmentations (``RandomPerspective``, ``RandomFlip``,
+    ``LetterBox``) apply the identical warp/flip/pad to the paired ``motion`` array, so the two
+    streams stay in spatial registration; appearance-only ops (``RandomHSV``, ``Albumentations``)
+    skip it intentionally.
+
+    Motion-specific augmentation (``motion_aug=True``, train split only) perturbs only the motion
+    map, teaching the temporal-smoothness invariances the appearance stream can't provide (in the
+    spirit of smooth/temporal-consistency regularization for video models):
+      - amplitude jitter x U(0.6, 1.5): detections must be stable under closing-speed / frame-gap
+        changes that scale diff magnitude;
+      - motion dropout (p = 0.1): the whole map is zeroed, forcing the appearance pathway to stay
+        self-sufficient (guards against the appearance degradation seen in earlier motion runs) and
+        matching the zero-motion fallback used at inference for the first frame;
+      - additive Gaussian noise, sigma ~ U(0, 3): robustness to sensor-noise floor differences.
 
     The ``motion`` tensor in each batch item is a uint8 CHW tensor (0–255) that is normalised to
     float [0, 1] inside the trainer's / validator's ``preprocess_batch``.
@@ -438,12 +449,46 @@ class MotionYOLODataset(YOLODataset):
         >>> item["motion"].shape  # (3, H, W) uint8 tensor
     """
 
+    MOTION_AUG_DEFAULTS = {"dropout": 0.1, "gain": (0.6, 1.5), "noise": 3.0}
+
+    def __init__(self, *args, motion_mosaic: bool = False, motion_aug: bool | dict = False, **kwargs):
+        """Initialise; ``motion_mosaic`` / ``motion_aug`` must be set before transforms are built.
+
+        ``motion_aug`` may be ``True`` (MOTION_AUG_DEFAULTS) or a dict overriding any of
+        ``dropout`` (probability of zeroing the map), ``gain`` ((lo, hi) amplitude jitter range)
+        and ``noise`` (max Gaussian sigma). The defaults traded ~8 pts of <=8 px recall for
+        precision in ablation round 2 - lighter settings (e.g. dropout 0.05, gain (0.8, 1.3))
+        aim to keep the false-alarm benefit without teaching the model to distrust faint blobs.
+        """
+        self.motion_mosaic = motion_mosaic
+        if motion_aug is True:
+            self.motion_aug = dict(self.MOTION_AUG_DEFAULTS)
+        elif isinstance(motion_aug, dict):
+            self.motion_aug = {**self.MOTION_AUG_DEFAULTS, **motion_aug}
+        else:
+            self.motion_aug = None
+        super().__init__(*args, **kwargs)  # calls build_transforms(), which reads the flags above
+
     def get_image_and_label(self, index: int) -> dict:
-        """Load image, label, and corresponding motion-difference image."""
+        """Load image, label, and corresponding motion-difference image (optionally augmented)."""
         label = super().get_image_and_label(index)
         h, w = label["img"].shape[:2]
-        label["motion"] = self._load_motion(self.im_files[index], (h, w))
+        motion = self._load_motion(self.im_files[index], (h, w))
+        if self.motion_aug and self.augment:
+            motion = self._augment_motion(motion)
+        label["motion"] = motion
         return label
+
+    def _augment_motion(self, motion: np.ndarray) -> np.ndarray:
+        """Apply motion-only perturbations (amplitude jitter, dropout, noise); see class docstring."""
+        cfg = self.motion_aug
+        if np.random.rand() < cfg["dropout"]:  # motion dropout
+            return np.zeros_like(motion)
+        out = motion.astype(np.float32) * np.random.uniform(*cfg["gain"])  # amplitude jitter
+        sigma = np.random.uniform(0.0, cfg["noise"])
+        if sigma > 0.1:
+            out += np.random.normal(0.0, sigma, out.shape).astype(np.float32)
+        return np.clip(out, 0, 255).astype(np.uint8)
 
     def _load_motion(self, im_file: str, hw: tuple) -> np.ndarray:
         """Load the motion-difference image for *im_file*, falling back to zeros.
@@ -497,15 +542,38 @@ class MotionYOLODataset(YOLODataset):
         return item
 
     def build_transforms(self, hyp: dict | None = None) -> Compose:
-        """Disable mosaic/mixup/cutmix and build standard transforms for temporal consistency."""
+        """Build transforms; mixup/cutmix always off, mosaic replaced by MotionMosaic when enabled."""
         if self.augment and hyp is not None:
             from copy import copy as _copy
 
             hyp = _copy(hyp)
-            hyp.mosaic = 0.0
+            if not self.motion_mosaic:
+                hyp.mosaic = 0.0
             hyp.mixup = 0.0
             hyp.cutmix = 0.0
-        return super().build_transforms(hyp)
+        transforms = super().build_transforms(hyp)
+        if self.motion_mosaic:
+            self._swap_in_motion_mosaic(transforms)
+        return transforms
+
+    def _swap_in_motion_mosaic(self, transforms) -> None:
+        """Recursively replace every Mosaic in a (possibly nested) Compose with MotionMosaic."""
+        from ultralytics.data.augment import Mosaic, MotionMosaic
+
+        stack = [transforms]
+        while stack:
+            node = stack.pop()
+            inner = getattr(node, "transforms", None)
+            if not isinstance(inner, list):
+                continue
+            for i, t in enumerate(inner):
+                if type(t) is Mosaic and t.n == 4:
+                    inner[i] = MotionMosaic(self, imgsz=t.imgsz, p=t.p, n=4)
+                elif hasattr(t, "transforms") or hasattr(t, "pre_transform"):
+                    stack.append(t)
+                pre = getattr(t, "pre_transform", None)
+                if pre is not None:
+                    stack.append(pre)
 
     @staticmethod
     def collate_fn(batch: list[dict]) -> dict:

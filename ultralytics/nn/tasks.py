@@ -545,6 +545,9 @@ class MotionDetectionModel(DetectionModel):
                                  # cut the O((H*W)^2) attention cost - see MotionCrossAttention.sr_ratio.
           gate_init: 0.1        # optional; initial raw gate value per cross-attention block
                                  # (contribution = tanh(gate_init)) - see MotionCrossAttention docstring.
+          fusion: [attn, attn, attn]  # optional; per inject point, "attn" (MotionCrossAttention) or
+                                 # "pixel" (MotionPixelFusion). Use "pixel" at fine scales where global
+                                 # attention dilutes few-pixel targets - see MotionPixelFusion docstring.
 
     Examples:
         >>> model = MotionDetectionModel("yolov8-motion.yaml", ch=3, nc=80)
@@ -561,7 +564,15 @@ class MotionDetectionModel(DetectionModel):
             nc (int, optional): Number of object classes.
             verbose (bool): Whether to display model information.
         """
-        from ultralytics.nn.modules.motion import MotionCrossAttention, MotionEncoder
+        from ultralytics.nn.modules.motion import (
+            MotionCrossAttention,
+            MotionEncoder,
+            MotionFiLMFusion,
+            MotionPixelFusion,
+            MotionPixelFusionSA,
+            MotionSpatialGate,
+            MotionWindowCrossAttention,
+        )
 
         # Guard used in _predict_once to skip motion stream during stride computation
         self._motion_ready = False
@@ -575,6 +586,7 @@ class MotionDetectionModel(DetectionModel):
         self.motion_feat_scales: list = motion_cfg.get("motion_feat_scales", [2, 3, 3])
         sr_ratios: list = motion_cfg.get("sr_ratios", [1] * len(self.inject_layers))
         gate_init: float = motion_cfg.get("gate_init", 0.1)
+        fusion: list = motion_cfg.get("fusion", ["attn"] * len(self.inject_layers))
 
         # Build motion encoder
         self.motion_encoder = MotionEncoder(in_channels=motion_ch, dims=encoder_dims)
@@ -585,9 +597,27 @@ class MotionDetectionModel(DetectionModel):
             dummy_enc = self.motion_encoder(torch.zeros(1, motion_ch, 256, 256))
         motion_channels = [dummy_enc[s].shape[1] for s in self.motion_feat_scales]
 
+        def build_fusion(cc, mc, sr, ft):
+            """One fusion module per inject point; type string comes from the yaml motion.fusion list."""
+            if ft == "pixel":
+                return MotionPixelFusion(cc, mc, gate_init=gate_init)
+            if ft == "pixel_cg":
+                return MotionPixelFusion(cc, mc, gate_init=gate_init, per_channel_gate=True)
+            if ft == "film":
+                return MotionFiLMFusion(cc, mc, gate_init=gate_init)
+            if ft == "spatgate":
+                return MotionSpatialGate(cc, mc, gate_init=gate_init)
+            if ft == "wattn":
+                return MotionWindowCrossAttention(cc, mc, num_heads=4, gate_init=gate_init)
+            if ft == "pixel_sa":
+                return MotionPixelFusionSA(cc, mc, num_heads=4, gate_init=gate_init)
+            if ft == "attn":
+                return MotionCrossAttention(cc, mc, num_heads=4, sr_ratio=sr, gate_init=gate_init)
+            raise ValueError(f"unknown motion fusion type {ft!r}")
+
         self.cross_attns = nn.ModuleList(
-            MotionCrossAttention(cc, mc, num_heads=4, sr_ratio=sr, gate_init=gate_init)
-            for cc, mc, sr in zip(curr_channels, motion_channels, sr_ratios)
+            build_fusion(cc, mc, sr, ft)
+            for cc, mc, sr, ft in zip(curr_channels, motion_channels, sr_ratios, fusion)
         )
         self._motion_ready = True
 

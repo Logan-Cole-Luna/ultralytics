@@ -60,7 +60,15 @@ from .block import (
     SCDown,
     TorchVision,
 )
-from .motion import MotionCrossAttention, MotionEncoder
+from .motion import (
+    MotionCrossAttention,
+    MotionEncoder,
+    MotionFiLMFusion,
+    MotionPixelFusion,
+    MotionPixelFusionSA,
+    MotionSpatialGate,
+    MotionWindowCrossAttention,
+)
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -113,6 +121,11 @@ __all__ = (
     "C1",
     "MotionCrossAttention",
     "MotionEncoder",
+    "MotionFiLMFusion",
+    "MotionPixelFusion",
+    "MotionPixelFusionSA",
+    "MotionSpatialGate",
+    "MotionWindowCrossAttention",
     "C2",
     "C2PSA",
     "C3",
