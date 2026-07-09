@@ -20,9 +20,11 @@ VARIANTS = [
     ("YOLOv8s (base)", "yolov8s.yaml", False),
     ("YOLOv8s-motion (3-layer)", "yolov8s-motion.yaml", True),
     ("YOLOv8s-motion (2-layer)", "yolov8s-motion-2attn.yaml", True),
+    ("YOLOv8s-motion (3-layer, P3 SR)", "yolov8s-motion-p3sr.yaml", True),
     ("YOLO26s (base)", "yolo26s.yaml", False),
     ("YOLO26s-motion (3-layer)", "yolo26s-motion.yaml", True),
     ("YOLO26s-motion (2-layer)", "yolo26s-motion-2attn.yaml", True),
+    ("YOLO26s-motion (3-layer, P3 SR)", "yolo26s-motion-p3sr.yaml", True),
 ]
 
 
@@ -101,6 +103,7 @@ def main():
         base = f"{family} (base)"
         three = f"{family}-motion (3-layer)"
         two = f"{family}-motion (2-layer)"
+        p3sr = f"{family}-motion (3-layer, P3 SR)"
         if base in by_label and three in by_label and two in by_label:
             p0, ms0 = by_label[base]
             p3, ms3 = by_label[three]
@@ -109,6 +112,13 @@ def main():
                 f"{family}: 3-layer adds {ms3 / ms0:.2f}x latency / {p3 / p0:.2f}x params over base; "
                 f"2-layer adds {ms2 / ms0:.2f}x latency / {p2 / p0:.2f}x params over base "
                 f"({ms3 / ms2:.2f}x latency, {p3 / p2:.2f}x params, 3-layer vs 2-layer)"
+            )
+        if p3sr in by_label and three in by_label:
+            _, ms3 = by_label[three]
+            _, ms_sr = by_label[p3sr]
+            print(
+                f"{family}: 3-layer w/ P3 spatial-reduction is {ms3 / ms_sr:.2f}x faster than full-dense "
+                f"3-layer while keeping all 3 injection points"
             )
 
 
