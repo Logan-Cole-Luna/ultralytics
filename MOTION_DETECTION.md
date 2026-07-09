@@ -5,6 +5,25 @@ The model jointly processes the **current frame** and a **motion-difference imag
 
 ---
 
+## Benchmark Results
+
+Evaluated on the AOT (Airborne Object Tracking) tiled val set — 839 ground-truth targets across 789 positive tiles + 671 negative tiles, all at native 640×640 resolution. Metrics computed with one consistent protocol across every row (see footnote 6): mAP50 / mAP50-95 are COCO 101-point AP; precision/recall are measured at confidence ≥ 0.05, IoU ≥ 0.1.
+
+| model | mAP50 | mAP50-95 | precision | recall | ≤8 px recall | below horizon | ms/tile |
+|---|---|---|---|---|---|---|---|
+| **WBF base+hybrid** | **0.619** | **0.364** | 0.407 | **0.821** | **0.618** | **0.960** | 15.5 |
+| base | 0.577 | 0.336 | 0.449 | 0.783 | 0.556 | 0.885 | **7.4** |
+| motion | 0.538 | 0.321 | 0.418 | 0.789 | 0.571 | 0.937 | 8.2 |
+| xattn | 0.542 | 0.329 | 0.491 | 0.751 | 0.512 | 0.862 | 8.3 |
+
+[^xattn]: **xattn** — `MotionDetectionModel` with `MotionCrossAttention` at all three injection points (P3/P4/P5), full dense attention (no spatial reduction). The original cross-attention design: current-frame features as queries, motion-encoder features as keys/values.
+[^hybrid]: **hybrid** — same as xattn, but P3 (the finest, highest-resolution scale) uses `MotionPixelFusion` instead of cross-attention: motion features are fused at matching spatial positions (concat → 3×3 conv → 1×1 projection) rather than globally attended. Cross-attention at P3 was diluting small/faint motion signals via spatial-reduction pooling before they reached the query; pixel-aligned fusion preserves per-location signal, which is why `hybrid` recovers most of xattn's mAP loss while beating it on ≤8 px recall and below-horizon detection. P4/P5 remain cross-attention.
+[^ensemble]: **Ensembles (WBF = Weighted Box Fusion)** — base and a motion model (`hybrid` or `hybrid_maug`) run independently on every tile; their raw detections (confidence > 0.01) are fused per tile: boxes from both models are greedily clustered by mutual IoU ≥ 0.55, each cluster's box coordinates are confidence-weighted, and the cluster's final score is combined via noisy-OR (`1 − ∏(1 − confᵢ)`) rather than averaged, so agreement between the two models pushes borderline detections higher instead of diluting a confident one. `hybrid_maug` is `hybrid` retrained with motion-only augmentation (amplitude jitter, dropout, Gaussian noise on the motion map) — lower FP rate, slightly lower recall, better precision. Ensembling costs the sum of both models' latency and inference passes.
+
+*Metrics for `base`, `hybrid`, `xattn`, and both ensembles were computed by `evaluate_all.py` on one shared prediction cache and box-matching implementation, so mAP/precision/recall are directly comparable across rows — training-run `results.csv` values (letterboxed/rect val) will differ slightly and should not be mixed with this table.*
+
+---
+
 ## Table of Contents
 
 1. [What Was Built](#what-was-built)
