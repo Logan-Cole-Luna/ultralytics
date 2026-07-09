@@ -759,47 +759,6 @@ class Mosaic(BaseMixTransform):
         return final_labels
 
 
-class MotionMosaic(Mosaic):
-    """Mosaic that also composes the paired motion-difference images (motion cross-attention datasets).
-
-    Standard mosaic was disabled for motion datasets on the grounds that a composite of four clips has
-    an incoherent motion field. But mosaic composes patches *spatially* - each quadrant's motion map is
-    perfectly coherent with that quadrant's image, exactly like appearance. What actually breaks is
-    compositing the images while leaving ``labels["motion"]`` untouched (the downstream affine would
-    then warp a misregistered map). This subclass pastes each patch's motion map with the same layout
-    as its image, so the two streams stay in registration; quadrant seams appear identically in both.
-
-    Only the ``n=4`` grid is supported (the default used by v8_transforms).
-    """
-
-    def __init__(self, dataset, imgsz: int = 640, p: float = 1.0, n: int = 4):
-        assert n == 4, "MotionMosaic supports only the 4-image grid"
-        super().__init__(dataset, imgsz=imgsz, p=p, n=n)
-
-    def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Compose the mosaic image, then compose motion maps with the identical layout."""
-        layout = params["layout"]
-        motion4 = np.zeros((self.imgsz * 2, self.imgsz * 2, 3), dtype=np.uint8)  # zero = "no motion"
-        for item in layout:
-            patch = item["labels_patch"]
-            motion = patch.get("motion")
-            if motion is None:  # missing map for this patch -> its quadrant stays zero
-                continue
-            if motion.ndim == 2:
-                motion = motion[..., None]
-            if motion.shape[2] == 1:
-                motion = np.repeat(motion, 3, axis=2)
-            h, w = patch["img"].shape[:2]
-            if motion.shape[:2] != (h, w):  # safety net; get_image_and_label already matches shapes
-                motion = cv2.resize(motion, (w, h)).reshape(h, w, -1)[..., :3]
-            x1a, y1a, x2a, y2a = item["x1a"], item["y1a"], item["x2a"], item["y2a"]
-            x1b, y1b, x2b, y2b = item["x1b"], item["y1b"], item["x2b"], item["y2b"]
-            motion4[y1a:y2a, x1a:x2a] = motion[y1b:y2b, x1b:x2b]
-        labels = super().apply_image(labels, params)
-        labels["motion"] = motion4
-        return labels
-
-
 class MixUp(BaseMixTransform):
     """Apply MixUp augmentation to image datasets.
 
